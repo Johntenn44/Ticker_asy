@@ -1,7 +1,7 @@
 on:
   schedule:
     - cron: '* * * * *'  # Runs every day at 01:15 UTC
-  
+  workflow_dispatch:
 
 jobs:
   check_ma_crossover:
