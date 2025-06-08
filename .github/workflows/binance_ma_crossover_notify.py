@@ -9,6 +9,11 @@ from datetime import datetime, timezone
 COINS = [
     "BTC/USD",
     "ETH/USD",
+    "XMR/USD",
+    "LTC/USD",
+    "NEAR/USD",
+    "MNT/USD",
+    "DOGE/USD",
     # Add more Kraken trading pairs here
 ]
 
