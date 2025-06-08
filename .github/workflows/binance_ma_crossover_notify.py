@@ -11,6 +11,7 @@ COINS = [
     "ETH/USD",
     "DOGE/USD",
     "LTC/USD",
+    "NEAR/USD",
     # Add more Kraken symbols here
 ]
 
