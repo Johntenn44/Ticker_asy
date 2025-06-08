@@ -25,7 +25,7 @@ jobs:
           pip install ccxt requests pandas
 
       - name: Download Python script
-        run: curl -o binance_ma_crossover_notify.py https://www.dropbox.com/scl/fi/w17mizep53ik852gb9nwn/binance_ma_crossover_notify.py?rlkey=zeewy27u97hsdbtv1827zkzfx&st=4iegbulg&dl=1
+        run: curl -o binance_ma_crossover_notify.py "https://www.dropbox.com/scl/fi/w17mizep53ik852gb9nwn/binance_ma_crossover_notify.py?rlkey=zeewy27u97hsdbtv1827zkzfx&st=4iegbulg&dl=1"
 
       - name: Verify script download
         run: head -n 10 binance_ma_crossover_notify.py
