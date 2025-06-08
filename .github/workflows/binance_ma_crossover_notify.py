@@ -15,7 +15,7 @@ COINS = [
     # Add more Kraken symbols here
 ]
 
-EXCHANGE_ID = 'kraken'
+EXCHANGE_ID = 'kucoin'
 INTERVAL = '6H'      # <-- Changed from '1d' to '6h'
 LOOKBACK = 210       # Number of candles to fetch (must be >= 200)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
