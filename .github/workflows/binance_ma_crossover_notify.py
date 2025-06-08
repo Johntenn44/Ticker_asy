@@ -2,40 +2,41 @@ import os
 import ccxt
 import pandas as pd
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 
 # --- CONFIGURATION ---
 
 COINS = [
-    "BTC/USDT",
-    "ETH/USDT",
-    # Add more Binance symbols here
+    "BTC/USD",
+    "ETH/USD",
+    # Add more Kraken trading pairs here
 ]
 
-EXCHANGE_ID = 'binance'
+EXCHANGE_ID = 'kraken'
 INTERVAL = '1d'
 LOOKBACK = 210  # Number of days to fetch
+
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # --- FUNCTIONS ---
 
 def fetch_ohlcv_ccxt(symbol, timeframe, limit):
-    exchange = getattr(ccxt, EXCHANGE_ID)()
-    ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
-    df = pd.DataFrame(
-        ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']
-    )
+    exchange = getattr(ccxt, EXCHANGE_ID)({'enableRateLimit': True})
+    ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    if df.empty:
+        raise ValueError(f"No data fetched for {symbol}")
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     df.set_index('timestamp', inplace=True)
     df['close'] = df['close'].astype(float)
     return df
 
 def check_ma_crossover(df):
-    df["MA50"] = df["close"].rolling(window=50).mean()
-    df["MA200"] = df["close"].rolling(window=200).mean()
-    last_two = df.iloc[-2:]
-    return (last_two["MA200"] > last_two["MA50"]).all()
+    df['MA50'] = df['close'].rolling(window=50).mean()
+    df['MA200'] = df['close'].rolling(window=200).mean()
+    last_two = df.iloc[-2:].dropna()
+    return len(last_two) == 2 and (last_two['MA200'] > last_two['MA50']).all()
 
 def send_telegram_message(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -62,9 +63,9 @@ def main():
             print(f"Error processing {symbol}: {e}")
 
     if notified_coins:
-        dt = datetime.utcnow().strftime('%Y-%m-%d')
+        dt = datetime.now(timezone.utc).strftime('%Y-%m-%d')
         msg = (
-            f"<b>Binance MA Crossover Alert ({dt})</b>\n"
+            f"<b>Kraken MA Crossover Alert ({dt})</b>\n"
             f"The following coins have had the 200-day MA above the 50-day MA for two consecutive days:\n"
             + "\n".join(f"• <code>{c}</code>" for c in notified_coins)
         )
