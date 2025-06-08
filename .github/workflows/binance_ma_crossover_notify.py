@@ -10,7 +10,7 @@ COINS = [
     "BTC/USD",  # Kraken uses XBT for Bitcoin
     "ETH/USD",
     "DOGE/USD",
-    "MNT/USD",
+    "LTC/USD",
     # Add more Kraken symbols here
 ]
 
