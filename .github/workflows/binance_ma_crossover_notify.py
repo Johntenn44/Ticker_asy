@@ -14,7 +14,7 @@ COINS = [
 ]
 
 EXCHANGE_ID = 'kraken'
-INTERVAL = '6h'      # <-- Changed from '1d' to '6h'
+INTERVAL = '1d'      # <-- Changed from '1d' to '6h'
 LOOKBACK = 210       # Number of candles to fetch (must be >= 200)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
