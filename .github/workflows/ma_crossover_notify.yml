@@ -5,6 +5,7 @@ on:
 
 jobs:
   check_ma_crossover:
+    if: github.event.schedule == '* * * * *'
     runs-on: ubuntu-latest
 
     steps:
