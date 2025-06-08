@@ -7,8 +7,11 @@ from datetime import datetime
 # --- CONFIGURATION ---
 
 COINS = [
-    "XBT/USDT",  # Kraken uses XBT for Bitcoin
-    "ETH/USDT",
+    "BTC/USD",  # Kraken uses XBT for Bitcoin
+    "ETH/USD",
+    "DOGE/USD",
+    "XRP/USD",
+    "MNT/USD",
     # Add more Kraken symbols here
 ]
 
