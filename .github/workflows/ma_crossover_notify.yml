@@ -1,5 +1,3 @@
-name: Binance MA Crossover Notification
-
 on:
   schedule:
     - cron: '15 1 * * *'  # Runs every day at 01:15 UTC
@@ -10,8 +8,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -26,10 +23,14 @@ jobs:
       - name: Download Python script
         run: curl -o binance_ma_crossover_notify.py ${{ secrets.CHECKER }}
 
+      - name: Verify script download
+        run: head -n 10 binance_ma_crossover_notify.py
+
+      - name: Print current UTC time
+        run: date -u
+
       - name: Run MA crossover check
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          python binance_ma_crossover_notify.py
-          
+        run: python binance_ma_crossover_notify.py
