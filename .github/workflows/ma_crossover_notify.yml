@@ -1,6 +1,6 @@
 on:
   schedule:
-    - cron: '53 12 * * *'  # Runs every day at 01:15 UTC
+    - cron: '53 6 * * *'  # Runs every day at 01:15 UTC
   workflow_dispatch:
 
 jobs:
