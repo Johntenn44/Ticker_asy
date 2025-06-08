@@ -15,7 +15,7 @@ COINS = [
     # Add more Kraken symbols here
 ]
 
-EXCHANGE_ID = 'binance'
+EXCHANGE_ID = 'bybit'
 INTERVAL = '6h'      # <-- Changed from '1d' to '6h'
 LOOKBACK = 210       # Number of candles to fetch (must be >= 200)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
