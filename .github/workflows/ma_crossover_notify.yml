@@ -2,7 +2,7 @@ name: Binance MA Crossover Notification
 
 on:
   schedule:
-    - cron: '5 1 * * *'  # Runs every day at 08:00 UTC
+    - cron: '15 1 * * *'  # Runs every day at 01:15 UTC
   workflow_dispatch:
 
 jobs:
