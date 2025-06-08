@@ -24,7 +24,7 @@ jobs:
           pip install ccxt requests pandas
 
       - name: Download Python script
-        run: curl -o binance_ma_crossover_notify.py https://raw.githubusercontent.com/Johntenn44/Ticker_asy/main/binance_ma_crossover_notify.py
+        run: curl -o binance_ma_crossover_notify.py https://raw.githubusercontent.com/Johntenn44/Ticker_asy/refs/heads/main/.github/workflows/binance_ma_crossover_notify.py
 
       - name: Run MA crossover check
         env:
