@@ -2,22 +2,38 @@ import os
 import ccxt
 import pandas as pd
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # --- CONFIGURATION ---
 
 COINS = [
-    "BTC/USDT",  # Kraken uses XBT for Bitcoin
-    "ETH/USDT",
+    "XRP/USDT",
+    "XMR/USDT",
+    "GMX/USDT",
+    "LUNA/USDT",
+    "TRX/USDT",
+    "EIGEN/USDT",
+    "APE/USDT",
+    "WAVES/USDT",
+    "PLUME/USDT",
+    "SUSHI/USDT",
     "DOGE/USDT",
+    "VIRTUAL/USDT",
+    "CAKE/USDT",
+    "GRASS/USDT",
+    "AAVE/USDT",
+    "SUI/USDT",
+    "ARB/USDT",
+    "XLM/USDT",
+    "MNT/USDT",
     "LTC/USDT",
     "NEAR/USDT",
-    # Add more Kraken symbols here
 ]
 
 EXCHANGE_ID = 'kucoin'
-INTERVAL = '6h'      # <-- Changed from '1d' to '6h'
-LOOKBACK = 210       # Number of candles to fetch (must be >= 200)
+INTERVAL = '4h'       # 4-hour candles
+LOOKBACK = 500        # Number of candles to fetch (>= 200 for indicators)
+
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -37,52 +53,35 @@ def add_indicators(df):
 
 def analyze_trend(df):
     results = {}
-    cp = df['close'].iloc[-1]
-    A = df['EMA8'].iloc[-1]
-    B = df['EMA13'].iloc[-1]
-    C = df['EMA21'].iloc[-1]
-    D = df['EMA50'].iloc[-1]
-    E = df['EMA200'].iloc[-1]
-    MA50 = df['MA50'].iloc[-1]
-    MA200 = df['MA200'].iloc[-1]
+    if len(df) < 2:
+        return results
 
-    # --- Start Conditions ---
-    if (E > cp > A > B > C > D > MA50) and (cp < MA200):
+    cp1 = df['close'].iloc[-1]
+    cp2 = df['close'].iloc[-2]
+
+    A1 = df['EMA8'].iloc[-1]
+    B1 = df['EMA13'].iloc[-1]
+    C1 = df['EMA21'].iloc[-1]
+    D1 = df['EMA50'].iloc[-1]
+    E1 = df['EMA200'].iloc[-1]
+    MA50_1 = df['MA50'].iloc[-1]
+    MA200_1 = df['MA200'].iloc[-1]
+
+    A2 = df['EMA8'].iloc[-2]
+    B2 = df['EMA13'].iloc[-2]
+    C2 = df['EMA21'].iloc[-2]
+    D2 = df['EMA50'].iloc[-2]
+    E2 = df['EMA200'].iloc[-2]
+    MA50_2 = df['MA50'].iloc[-2]
+    MA200_2 = df['MA200'].iloc[-2]
+
+    if (E1 > cp1 > A1 > B1 > C1 > D1 > MA50_1) and (cp1 < MA200_1) and \
+       (E2 > cp2 > A2 > B2 > C2 > D2 > MA50_2) and (cp2 < MA200_2):
         results['start'] = 'uptrend'
-    elif (E < cp < A < B < C < D < MA50) and (cp > MA200):
+    elif (E1 < cp1 < A1 < B1 < C1 < D1 < MA50_1) and (cp1 > MA200_1) and \
+         (E2 < cp2 < A2 < B2 < C2 < D2 < MA50_2) and (cp2 > MA200_2):
         results['start'] = 'downtrend'
 
-    # --- Continue Conditions ---
-    if results.get('start') == 'uptrend':
-        if abs(cp - E) < 1e-8 and abs(cp - MA200) > 1e-8:
-            results['continue'] = 'up_a'
-        elif abs(cp - MA200) < 1e-8 and abs(cp - E) > 1e-8:
-            results['continue'] = 'up_b'
-    elif results.get('start') == 'downtrend':
-        if abs(cp - E) < 1e-8 and abs(cp - MA200) > 1e-8:
-            results['continue'] = 'down_a'
-        elif abs(cp - MA200) < 1e-8 and abs(cp - E) > 1e-8:
-            results['continue'] = 'down_b'
-
-    # --- Reversal/Reset Conditions ---
-    if results.get('start') == 'uptrend':
-        if (cp < min(A, B, C, D)) or not (A > B > C > D) or abs(cp - MA50) < 1e-8:
-            results['warn'] = 'uptrend reversal/reset'
-    elif results.get('start') == 'downtrend':
-        if (cp > max(A, B, C, D)) or not (A < B < C < D) or abs(cp - MA50) < 1e-8:
-            results['warn'] = 'downtrend reversal/reset'
-
-    # --- End Conditions ---
-    if cp >= MA200 >= E:
-        results['end'] = 'uptrend end'
-    elif cp <= MA200 <= E:
-        results['end'] = 'downtrend end'
-
-    # --- Save values for reporting ---
-    results['values'] = {
-        'cp': cp, 'EMA8': A, 'EMA13': B, 'EMA21': C, 'EMA50': D, 'EMA200': E,
-        'MA50': MA50, 'MA200': MA200
-    }
     return results
 
 # --- DATA FETCHING ---
@@ -90,7 +89,8 @@ def analyze_trend(df):
 def fetch_ohlcv_ccxt(symbol, timeframe, limit):
     exchange = getattr(ccxt, EXCHANGE_ID)()
     exchange.load_markets()
-    ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+    symbol_api = symbol.replace('/', '-')
+    ohlcv = exchange.fetch_ohlcv(symbol_api, timeframe, limit=limit)
     df = pd.DataFrame(
         ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']
     )
@@ -102,6 +102,9 @@ def fetch_ohlcv_ccxt(symbol, timeframe, limit):
 # --- TELEGRAM NOTIFICATION ---
 
 def send_telegram_message(message):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Telegram bot token or chat ID not set in environment variables.")
+        return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
@@ -109,50 +112,111 @@ def send_telegram_message(message):
         "parse_mode": "HTML"
     }
     resp = requests.post(url, data=payload)
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"Failed to send Telegram message: {e}")
 
-# --- MAIN LOGIC ---
+# --- BACKTESTING ---
+
+def backtest(df):
+    trades = []
+    position = None
+    entry_price = 0.0
+    entry_index = 0
+
+    for i in range(200, len(df)):
+        window_df = df.iloc[:i+1]
+        trend = analyze_trend(window_df)
+
+        if 'start' in trend:
+            if position != trend['start']:
+                if position is not None:
+                    trades.append({
+                        'entry_index': entry_index,
+                        'exit_index': i-1,
+                        'position': position,
+                        'entry_price': entry_price,
+                        'exit_price': df['close'].iloc[i-1],
+                        'profit': (df['close'].iloc[i-1] - entry_price) * (1 if position == 'uptrend' else -1)
+                    })
+                position = trend['start']
+                entry_price = df['close'].iloc[i]
+                entry_index = i
+        else:
+            if position is not None:
+                trades.append({
+                    'entry_index': entry_index,
+                    'exit_index': i,
+                    'position': position,
+                    'entry_price': entry_price,
+                    'exit_price': df['close'].iloc[i],
+                    'profit': (df['close'].iloc[i] - entry_price) * (1 if position == 'uptrend' else -1)
+                })
+                position = None
+
+    if position is not None:
+        trades.append({
+            'entry_index': entry_index,
+            'exit_index': len(df)-1,
+            'position': position,
+            'entry_price': entry_price,
+            'exit_price': df['close'].iloc[-1],
+            'profit': (df['close'].iloc[-1] - entry_price) * (1 if position == 'uptrend' else -1)
+        })
+
+    return trades
+
+def filter_trades_last_7_days(trades, df):
+    now = datetime.utcnow()
+    seven_days_ago = now - timedelta(days=7)
+    filtered = []
+    for t in trades:
+        entry_time = df.index[t['entry_index']]
+        if entry_time >= seven_days_ago:
+            filtered.append(t)
+    return filtered
+
+def format_backtest_summary(symbol, trades):
+    total_profit = sum(t['profit'] for t in trades)
+    num_trades = len(trades)
+    wins = sum(1 for t in trades if t['profit'] > 0)
+    losses = num_trades - wins
+    win_rate = (wins / num_trades * 100) if num_trades > 0 else 0
+
+    msg = (
+        f"<b>Backtest Summary for {symbol} ({INTERVAL})</b>\n"
+        f"Trades in last 7 days: {num_trades}\n"
+        f"Wins: {wins}, Losses: {losses}, Win Rate: {win_rate:.2f}%\n"
+        f"Total Profit (price units): {total_profit:.4f}\n"
+        "----------------------------------------"
+    )
+    return msg
+
+# --- MAIN ---
 
 def main():
-    dt = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
-    messages = []
+    all_messages = []
     for symbol in COINS:
         try:
+            print(f"Fetching data for {symbol}...")
             df = fetch_ohlcv_ccxt(symbol, INTERVAL, LOOKBACK)
             if len(df) < 200:
-                print(f"Not enough data for {symbol}")
+                print(f"Not enough data for {symbol}, skipping.")
                 continue
             df = add_indicators(df)
-            trend = analyze_trend(df)
-            # Format message if any condition is met
-            if any(k in trend for k in ['start', 'continue', 'warn', 'end']):
-                vals = trend['values']
-                msg = (
-                    f"<b>Kraken Trend Alert ({dt})</b>\n"
-                    f"<b>Symbol:</b> <code>{symbol}</code>\n"
-                )
-                if 'start' in trend:
-                    msg += f"Start: <b>{trend['start']}</b>\n"
-                if 'continue' in trend:
-                    msg += f"Continue: <b>{trend['continue']}</b>\n"
-                if 'warn' in trend:
-                    msg += f"⚠️ <b>Warning:</b> {trend['warn']}\n"
-                if 'end' in trend:
-                    msg += f"End: <b>{trend['end']}</b>\n"
-                msg += (
-                    f"\n<code>cp={vals['cp']:.2f}, EMA8={vals['EMA8']:.2f}, EMA13={vals['EMA13']:.2f}, "
-                    f"EMA21={vals['EMA21']:.2f}, EMA50={vals['EMA50']:.2f}, EMA200={vals['EMA200']:.2f}, "
-                    f"MA50={vals['MA50']:.2f}, MA200={vals['MA200']:.2f}</code>"
-                )
-                messages.append(msg)
+            trades = backtest(df)
+            trades_recent = filter_trades_last_7_days(trades, df)
+            summary_msg = format_backtest_summary(symbol, trades_recent)
+            all_messages.append(summary_msg)
         except Exception as e:
             print(f"Error processing {symbol}: {e}")
 
-    if messages:
-        for msg in messages:
-            send_telegram_message(msg)
+    if all_messages:
+        full_message = "\n\n".join(all_messages)
+        send_telegram_message(full_message)
     else:
-        print("No trend signals for any coin.")
+        send_telegram_message("No backtest results available for the past 7 days.")
 
 if __name__ == "__main__":
     main()
