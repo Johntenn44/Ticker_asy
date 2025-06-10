@@ -2,7 +2,7 @@ name: Kraken Trend Alert
 
 on:
   schedule:
-    - cron: '35 22 * * 3,6'
+    - cron: '35 22 * * 2,3,6'
   workflow_dispatch:
   
 jobs:
