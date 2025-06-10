@@ -59,7 +59,6 @@ def analyze_trend(df):
     cp1, cp2 = df['close'].iloc[-1], df['close'].iloc[-2]
     A1, B1, C1, D1, E1 = df['EMA8'].iloc[-1], df['EMA13'].iloc[-1], df['EMA21'].iloc[-1], df['EMA50'].iloc[-1], df['EMA200'].iloc[-1]
     MA50_1, MA200_1 = df['MA50'].iloc[-1], df['MA200'].iloc[-1]
-
     A2, B2, C2, D2, E2 = df['EMA8'].iloc[-2], df['EMA13'].iloc[-2], df['EMA21'].iloc[-2], df['EMA50'].iloc[-2], df['EMA200'].iloc[-2]
     MA50_2, MA200_2 = df['MA50'].iloc[-2], df['MA200'].iloc[-2]
 
@@ -212,7 +211,11 @@ def main():
                 print(f"Error processing {symbol} {interval}: {e}")
 
     if all_messages:
-        full_message = "\n\n".join(all_messages)
+        now = datetime.utcnow()
+        seven_days_ago = now - timedelta(days=7)
+        header = (f"<b>Backtest results for the period:</b> "
+                  f"{seven_days_ago.strftime('%Y-%m-%d %H:%M')} UTC to {now.strftime('%Y-%m-%d %H:%M')} UTC\n\n")
+        full_message = header + "\n\n".join(all_messages)
         send_telegram_message(full_message)
     else:
         send_telegram_message("No backtest results available for the past 7 days.")
