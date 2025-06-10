@@ -31,10 +31,9 @@ COINS = [
 ]
 
 EXCHANGE_ID = 'kucoin'
-INTERVAL = '6h'       # 4-hour candles
-LOOKBACK = 500        # Number of candles to fetch (>= 200 for indicators)
-
-LEVERAGE = 10         # Simulated leverage factor
+INTERVALS = ['4h', '6h', '12h']  # Timeframes to check
+LOOKBACK = 500                  # Candles to fetch (>= 200 for indicators)
+LEVERAGE = 10                  # Simulated leverage factor
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -54,37 +53,23 @@ def add_indicators(df):
 # --- TREND LOGIC ---
 
 def analyze_trend(df):
-    results = {}
     if len(df) < 2:
-        return results
+        return {}
 
-    cp1 = df['close'].iloc[-1]
-    cp2 = df['close'].iloc[-2]
+    cp1, cp2 = df['close'].iloc[-1], df['close'].iloc[-2]
+    A1, B1, C1, D1, E1 = df['EMA8'].iloc[-1], df['EMA13'].iloc[-1], df['EMA21'].iloc[-1], df['EMA50'].iloc[-1], df['EMA200'].iloc[-1]
+    MA50_1, MA200_1 = df['MA50'].iloc[-1], df['MA200'].iloc[-1]
 
-    A1 = df['EMA8'].iloc[-1]
-    B1 = df['EMA13'].iloc[-1]
-    C1 = df['EMA21'].iloc[-1]
-    D1 = df['EMA50'].iloc[-1]
-    E1 = df['EMA200'].iloc[-1]
-    MA50_1 = df['MA50'].iloc[-1]
-    MA200_1 = df['MA200'].iloc[-1]
-
-    A2 = df['EMA8'].iloc[-2]
-    B2 = df['EMA13'].iloc[-2]
-    C2 = df['EMA21'].iloc[-2]
-    D2 = df['EMA50'].iloc[-2]
-    E2 = df['EMA200'].iloc[-2]
-    MA50_2 = df['MA50'].iloc[-2]
-    MA200_2 = df['MA200'].iloc[-2]
+    A2, B2, C2, D2, E2 = df['EMA8'].iloc[-2], df['EMA13'].iloc[-2], df['EMA21'].iloc[-2], df['EMA50'].iloc[-2], df['EMA200'].iloc[-2]
+    MA50_2, MA200_2 = df['MA50'].iloc[-2], df['MA200'].iloc[-2]
 
     if (E1 > cp1 > A1 > B1 > C1 > D1 > MA50_1) and (cp1 < MA200_1) and \
        (E2 > cp2 > A2 > B2 > C2 > D2 > MA50_2) and (cp2 < MA200_2):
-        results['start'] = 'uptrend'
+        return {'start': 'uptrend'}
     elif (E1 < cp1 < A1 < B1 < C1 < D1 < MA50_1) and (cp1 > MA200_1) and \
          (E2 < cp2 < A2 < B2 < C2 < D2 < MA50_2) and (cp2 > MA200_2):
-        results['start'] = 'downtrend'
-
-    return results
+        return {'start': 'downtrend'}
+    return {}
 
 # --- DATA FETCHING ---
 
@@ -93,9 +78,7 @@ def fetch_ohlcv_ccxt(symbol, timeframe, limit):
     exchange.load_markets()
     symbol_api = symbol.replace('/', '-')
     ohlcv = exchange.fetch_ohlcv(symbol_api, timeframe, limit=limit)
-    df = pd.DataFrame(
-        ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']
-    )
+    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     df.set_index('timestamp', inplace=True)
     df['close'] = df['close'].astype(float)
@@ -123,7 +106,7 @@ def send_telegram_message(message):
 
 def backtest(df):
     trades = []
-    position = None  # None, 'uptrend' (long), or 'downtrend' (short)
+    position = None
     entry_price = 0.0
     entry_index = 0
 
@@ -136,7 +119,7 @@ def backtest(df):
                 if position is not None:
                     exit_price = df['close'].iloc[i-1]
                     profit = (exit_price - entry_price) if position == 'uptrend' else (entry_price - exit_price)
-                    profit *= LEVERAGE  # Apply 10x leverage
+                    profit *= LEVERAGE
                     trades.append({
                         'entry_index': entry_index,
                         'exit_index': i-1,
@@ -152,7 +135,7 @@ def backtest(df):
             if position is not None:
                 exit_price = df['close'].iloc[i]
                 profit = (exit_price - entry_price) if position == 'uptrend' else (entry_price - exit_price)
-                profit *= LEVERAGE  # Apply 10x leverage
+                profit *= LEVERAGE
                 trades.append({
                     'entry_index': entry_index,
                     'exit_index': i,
@@ -166,7 +149,7 @@ def backtest(df):
     if position is not None:
         exit_price = df['close'].iloc[-1]
         profit = (exit_price - entry_price) if position == 'uptrend' else (entry_price - exit_price)
-        profit *= LEVERAGE  # Apply 10x leverage
+        profit *= LEVERAGE
         trades.append({
             'entry_index': entry_index,
             'exit_index': len(df)-1,
@@ -181,21 +164,16 @@ def backtest(df):
 def filter_trades_last_7_days(trades, df):
     now = datetime.utcnow()
     seven_days_ago = now - timedelta(days=7)
-    filtered = []
-    for t in trades:
-        entry_time = df.index[t['entry_index']]
-        if entry_time >= seven_days_ago:
-            filtered.append(t)
-    return filtered
+    return [t for t in trades if df.index[t['entry_index']] >= seven_days_ago]
 
-def format_backtest_summary(symbol, trades, df):
+def format_backtest_summary(symbol, trades, df, interval):
     total_profit = sum(t['profit'] for t in trades)
     num_trades = len(trades)
     wins = sum(1 for t in trades if t['profit'] > 0)
     losses = num_trades - wins
     win_rate = (wins / num_trades * 100) if num_trades > 0 else 0
 
-    msg = f"<b>Backtest Summary for {symbol} ({INTERVAL})</b>\n"
+    msg = f"<b>Backtest Summary for {symbol} ({interval})</b>\n"
     msg += f"Trades in last 7 days: {num_trades}\n"
     msg += f"Wins: {wins}, Losses: {losses}, Win Rate: {win_rate:.2f}%\n"
     msg += f"Total Profit (price units): {total_profit:.4f}\n"
@@ -215,22 +193,23 @@ def format_backtest_summary(symbol, trades, df):
 def main():
     all_messages = []
     for symbol in COINS:
-        try:
-            print(f"Fetching data for {symbol}...")
-            df = fetch_ohlcv_ccxt(symbol, INTERVAL, LOOKBACK)
-            if len(df) < 200:
-                print(f"Not enough data for {symbol}, skipping.")
-                continue
-            df = add_indicators(df)
-            trades = backtest(df)
-            trades_recent = filter_trades_last_7_days(trades, df)
-            if trades_recent:  # Only report coins with trades in last 7 days
-                summary_msg = format_backtest_summary(symbol, trades_recent, df)
-                all_messages.append(summary_msg)
-            else:
-                print(f"No trades in last 7 days for {symbol}, skipping report.")
-        except Exception as e:
-            print(f"Error processing {symbol}: {e}")
+        for interval in INTERVALS:
+            try:
+                print(f"Fetching data for {symbol} at interval {interval}...")
+                df = fetch_ohlcv_ccxt(symbol, interval, LOOKBACK)
+                if len(df) < 200:
+                    print(f"Not enough data for {symbol} {interval}, skipping.")
+                    continue
+                df = add_indicators(df)
+                trades = backtest(df)
+                trades_recent = filter_trades_last_7_days(trades, df)
+                if trades_recent:
+                    summary_msg = format_backtest_summary(symbol, trades_recent, df, interval)
+                    all_messages.append(summary_msg)
+                else:
+                    print(f"No trades in last 7 days for {symbol} {interval}, skipping report.")
+            except Exception as e:
+                print(f"Error processing {symbol} {interval}: {e}")
 
     if all_messages:
         full_message = "\n\n".join(all_messages)
