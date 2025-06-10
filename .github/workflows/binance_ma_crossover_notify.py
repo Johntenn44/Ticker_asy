@@ -224,8 +224,11 @@ def main():
             df = add_indicators(df)
             trades = backtest(df)
             trades_recent = filter_trades_last_7_days(trades, df)
-            summary_msg = format_backtest_summary(symbol, trades_recent, df)
-            all_messages.append(summary_msg)
+            if trades_recent:  # Only report coins with trades in last 7 days
+                summary_msg = format_backtest_summary(symbol, trades_recent, df)
+                all_messages.append(summary_msg)
+            else:
+                print(f"No trades in last 7 days for {symbol}, skipping report.")
         except Exception as e:
             print(f"Error processing {symbol}: {e}")
 
