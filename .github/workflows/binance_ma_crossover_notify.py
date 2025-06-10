@@ -34,6 +34,8 @@ EXCHANGE_ID = 'kucoin'
 INTERVAL = '4h'       # 4-hour candles
 LOOKBACK = 500        # Number of candles to fetch (>= 200 for indicators)
 
+LEVERAGE = 10         # Simulated leverage factor
+
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -121,7 +123,7 @@ def send_telegram_message(message):
 
 def backtest(df):
     trades = []
-    position = None
+    position = None  # None, 'uptrend' (long), or 'downtrend' (short)
     entry_price = 0.0
     entry_index = 0
 
@@ -132,37 +134,46 @@ def backtest(df):
         if 'start' in trend:
             if position != trend['start']:
                 if position is not None:
+                    exit_price = df['close'].iloc[i-1]
+                    profit = (exit_price - entry_price) if position == 'uptrend' else (entry_price - exit_price)
+                    profit *= LEVERAGE  # Apply 10x leverage
                     trades.append({
                         'entry_index': entry_index,
                         'exit_index': i-1,
                         'position': position,
                         'entry_price': entry_price,
-                        'exit_price': df['close'].iloc[i-1],
-                        'profit': (df['close'].iloc[i-1] - entry_price) * (1 if position == 'uptrend' else -1)
+                        'exit_price': exit_price,
+                        'profit': profit
                     })
                 position = trend['start']
                 entry_price = df['close'].iloc[i]
                 entry_index = i
         else:
             if position is not None:
+                exit_price = df['close'].iloc[i]
+                profit = (exit_price - entry_price) if position == 'uptrend' else (entry_price - exit_price)
+                profit *= LEVERAGE  # Apply 10x leverage
                 trades.append({
                     'entry_index': entry_index,
                     'exit_index': i,
                     'position': position,
                     'entry_price': entry_price,
-                    'exit_price': df['close'].iloc[i],
-                    'profit': (df['close'].iloc[i] - entry_price) * (1 if position == 'uptrend' else -1)
+                    'exit_price': exit_price,
+                    'profit': profit
                 })
                 position = None
 
     if position is not None:
+        exit_price = df['close'].iloc[-1]
+        profit = (exit_price - entry_price) if position == 'uptrend' else (entry_price - exit_price)
+        profit *= LEVERAGE  # Apply 10x leverage
         trades.append({
             'entry_index': entry_index,
             'exit_index': len(df)-1,
             'position': position,
             'entry_price': entry_price,
-            'exit_price': df['close'].iloc[-1],
-            'profit': (df['close'].iloc[-1] - entry_price) * (1 if position == 'uptrend' else -1)
+            'exit_price': exit_price,
+            'profit': profit
         })
 
     return trades
@@ -177,20 +188,26 @@ def filter_trades_last_7_days(trades, df):
             filtered.append(t)
     return filtered
 
-def format_backtest_summary(symbol, trades):
+def format_backtest_summary(symbol, trades, df):
     total_profit = sum(t['profit'] for t in trades)
     num_trades = len(trades)
     wins = sum(1 for t in trades if t['profit'] > 0)
     losses = num_trades - wins
     win_rate = (wins / num_trades * 100) if num_trades > 0 else 0
 
-    msg = (
-        f"<b>Backtest Summary for {symbol} ({INTERVAL})</b>\n"
-        f"Trades in last 7 days: {num_trades}\n"
-        f"Wins: {wins}, Losses: {losses}, Win Rate: {win_rate:.2f}%\n"
-        f"Total Profit (price units): {total_profit:.4f}\n"
-        "----------------------------------------"
-    )
+    msg = f"<b>Backtest Summary for {symbol} ({INTERVAL})</b>\n"
+    msg += f"Trades in last 7 days: {num_trades}\n"
+    msg += f"Wins: {wins}, Losses: {losses}, Win Rate: {win_rate:.2f}%\n"
+    msg += f"Total Profit (price units): {total_profit:.4f}\n"
+    msg += "Trades details:\n"
+
+    for i, t in enumerate(trades, 1):
+        entry_date = df.index[t['entry_index']].strftime('%Y-%m-%d %H:%M')
+        exit_date = df.index[t['exit_index']].strftime('%Y-%m-%d %H:%M')
+        msg += (f"{i}. {t['position'].capitalize()} | Entry: {entry_date} @ {t['entry_price']:.4f} | "
+                f"Exit: {exit_date} @ {t['exit_price']:.4f} | Profit: {t['profit']:.4f}\n")
+
+    msg += "----------------------------------------"
     return msg
 
 # --- MAIN ---
@@ -207,7 +224,7 @@ def main():
             df = add_indicators(df)
             trades = backtest(df)
             trades_recent = filter_trades_last_7_days(trades, df)
-            summary_msg = format_backtest_summary(symbol, trades_recent)
+            summary_msg = format_backtest_summary(symbol, trades_recent, df)
             all_messages.append(summary_msg)
         except Exception as e:
             print(f"Error processing {symbol}: {e}")
