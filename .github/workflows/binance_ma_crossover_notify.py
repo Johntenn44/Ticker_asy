@@ -31,7 +31,7 @@ COINS = [
 ]
 
 EXCHANGE_ID = 'kucoin'
-INTERVAL = '4h'       # 4-hour candles
+INTERVAL = '6h'       # 4-hour candles
 LOOKBACK = 500        # Number of candles to fetch (>= 200 for indicators)
 
 LEVERAGE = 10         # Simulated leverage factor
