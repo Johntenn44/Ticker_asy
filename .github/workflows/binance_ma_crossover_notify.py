@@ -7,33 +7,16 @@ from datetime import datetime, timedelta
 # --- CONFIGURATION ---
 
 COINS = [
-    "XRP/USDT",
-    "XMR/USDT",
-    "GMX/USDT",
-    "LUNA/USDT",
-    "TRX/USDT",
-    "EIGEN/USDT",
-    "APE/USDT",
-    "WAVES/USDT",
-    "PLUME/USDT",
-    "SUSHI/USDT",
-    "DOGE/USDT",
-    "VIRTUAL/USDT",
-    "CAKE/USDT",
-    "GRASS/USDT",
-    "AAVE/USDT",
-    "SUI/USDT",
-    "ARB/USDT",
-    "XLM/USDT",
-    "MNT/USDT",
-    "LTC/USDT",
-    "NEAR/USDT",
+    "XRP/USDT", "XMR/USDT", "GMX/USDT", "LUNA/USDT", "TRX/USDT",
+    "EIGEN/USDT", "APE/USDT", "WAVES/USDT", "PLUME/USDT", "SUSHI/USDT",
+    "DOGE/USDT", "VIRTUAL/USDT", "CAKE/USDT", "GRASS/USDT", "AAVE/USDT",
+    "SUI/USDT", "ARB/USDT", "XLM/USDT", "MNT/USDT", "LTC/USDT", "NEAR/USDT",
 ]
 
 EXCHANGE_ID = 'kucoin'
-INTERVALS = ['4h', '6h', '12h']  # Timeframes to check
-LOOKBACK = 500                  # Candles to fetch (>= 200 for indicators)
-LEVERAGE = 10                  # Simulated leverage factor
+INTERVALS = ['4h', '6h', '12h']
+LOOKBACK = 500
+LEVERAGE = 10
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -172,17 +155,20 @@ def format_backtest_summary(symbol, trades, df, interval):
     losses = num_trades - wins
     win_rate = (wins / num_trades * 100) if num_trades > 0 else 0
 
-    msg = f"<b>Backtest Summary for {symbol} ({interval})</b>\n"
-    msg += f"Trades in last 4 days: {num_trades}\n"
-    msg += f"Wins: {wins}, Losses: {losses}, Win Rate: {win_rate:.2f}%\n"
-    msg += f"Total Profit (price units): {total_profit:.4f}\n"
-    msg += "Trades details:\n"
+    msg = f"📊 <b>Backtest Summary for {symbol} ({interval})</b>\n"
+    msg += f"🕒 Trades in last 4 days: <code>{num_trades}</code>\n"
+    msg += f"✅ Wins: <b>{wins}</b> | ❌ Losses: <b>{losses}</b> | 🎯 Win Rate: <b>{win_rate:.2f}%</b>\n"
+    msg += f"💰 Total Profit (price units): <code>{total_profit:.4f}</code>\n"
+    msg += "📈 <b>Trades details:</b>\n"
 
     for i, t in enumerate(trades, 1):
         entry_date = df.index[t['entry_index']].strftime('%Y-%m-%d %H:%M')
         exit_date = df.index[t['exit_index']].strftime('%Y-%m-%d %H:%M')
-        msg += (f"{i}. {t['position'].capitalize()} | Entry: {entry_date} @ {t['entry_price']:.4f} | "
-                f"Exit: {exit_date} @ {t['exit_price']:.4f} | Profit: {t['profit']:.4f}\n")
+        position_emoji = "📈" if t['position'] == 'uptrend' else "📉"
+        msg += (f"{i}. {position_emoji} <b>{t['position'].capitalize()}</b> | "
+                f"Entry: <code>{entry_date}</code> @ <code>{t['entry_price']:.4f}</code> | "
+                f"Exit: <code>{exit_date}</code> @ <code>{t['exit_price']:.4f}</code> | "
+                f"Profit: <code>{t['profit']:.4f}</code>\n")
 
     msg += "----------------------------------------"
     return msg
@@ -190,7 +176,7 @@ def format_backtest_summary(symbol, trades, df, interval):
 # --- MAIN ---
 
 def main():
-    report_entries = []  # List of tuples (earliest_entry_time, summary_msg)
+    report_entries = []
 
     for symbol in COINS:
         for interval in INTERVALS:
@@ -214,9 +200,8 @@ def main():
             except Exception as e:
                 print(f"Error processing {symbol} {interval}: {e}")
 
-    # Sort reports by earliest entry time
+    # Sort the report entries chronologically by earliest trade entry
     report_entries.sort(key=lambda x: x[0])
-
     all_messages = [entry[1] for entry in report_entries]
 
     if all_messages:
