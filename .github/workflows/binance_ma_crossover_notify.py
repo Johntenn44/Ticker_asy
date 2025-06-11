@@ -190,7 +190,8 @@ def format_backtest_summary(symbol, trades, df, interval):
 # --- MAIN ---
 
 def main():
-    all_messages = []
+    report_entries = []  # List of tuples (earliest_entry_time, summary_msg)
+
     for symbol in COINS:
         for interval in INTERVALS:
             try:
@@ -202,13 +203,21 @@ def main():
                 df = add_indicators(df)
                 trades = backtest(df)
                 trades_recent = filter_trades_last_4_days(trades, df)
+
                 if trades_recent:
+                    entry_times = [df.index[t['entry_index']] for t in trades_recent]
+                    earliest_entry = min(entry_times)
                     summary_msg = format_backtest_summary(symbol, trades_recent, df, interval)
-                    all_messages.append(summary_msg)
+                    report_entries.append((earliest_entry, summary_msg))
                 else:
                     print(f"No trades in last 4 days for {symbol} {interval}, skipping report.")
             except Exception as e:
                 print(f"Error processing {symbol} {interval}: {e}")
+
+    # Sort reports by earliest entry time
+    report_entries.sort(key=lambda x: x[0])
+
+    all_messages = [entry[1] for entry in report_entries]
 
     if all_messages:
         now = datetime.utcnow()
