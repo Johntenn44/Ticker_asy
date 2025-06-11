@@ -160,10 +160,10 @@ def backtest(df):
 
     return trades
 
-def filter_trades_last_7_days(trades, df):
+def filter_trades_last_4_days(trades, df):
     now = datetime.utcnow()
-    seven_days_ago = now - timedelta(days=7)
-    return [t for t in trades if df.index[t['entry_index']] >= seven_days_ago]
+    four_days_ago = now - timedelta(days=4)
+    return [t for t in trades if df.index[t['entry_index']] >= four_days_ago]
 
 def format_backtest_summary(symbol, trades, df, interval):
     total_profit = sum(t['profit'] for t in trades)
@@ -173,7 +173,7 @@ def format_backtest_summary(symbol, trades, df, interval):
     win_rate = (wins / num_trades * 100) if num_trades > 0 else 0
 
     msg = f"<b>Backtest Summary for {symbol} ({interval})</b>\n"
-    msg += f"Trades in last 7 days: {num_trades}\n"
+    msg += f"Trades in last 4 days: {num_trades}\n"
     msg += f"Wins: {wins}, Losses: {losses}, Win Rate: {win_rate:.2f}%\n"
     msg += f"Total Profit (price units): {total_profit:.4f}\n"
     msg += "Trades details:\n"
@@ -201,24 +201,24 @@ def main():
                     continue
                 df = add_indicators(df)
                 trades = backtest(df)
-                trades_recent = filter_trades_last_7_days(trades, df)
+                trades_recent = filter_trades_last_4_days(trades, df)
                 if trades_recent:
                     summary_msg = format_backtest_summary(symbol, trades_recent, df, interval)
                     all_messages.append(summary_msg)
                 else:
-                    print(f"No trades in last 7 days for {symbol} {interval}, skipping report.")
+                    print(f"No trades in last 4 days for {symbol} {interval}, skipping report.")
             except Exception as e:
                 print(f"Error processing {symbol} {interval}: {e}")
 
     if all_messages:
         now = datetime.utcnow()
-        seven_days_ago = now - timedelta(days=7)
+        four_days_ago = now - timedelta(days=4)
         header = (f"<b>Backtest results for the period:</b> "
-                  f"{seven_days_ago.strftime('%Y-%m-%d %H:%M')} UTC to {now.strftime('%Y-%m-%d %H:%M')} UTC\n\n")
+                  f"{four_days_ago.strftime('%Y-%m-%d %H:%M')} UTC to {now.strftime('%Y-%m-%d %H:%M')} UTC\n\n")
         full_message = header + "\n\n".join(all_messages)
         send_telegram_message(full_message)
     else:
-        send_telegram_message("No backtest results available for the past 7 days.")
+        send_telegram_message("No backtest results available for the past 4 days.")
 
 if __name__ == "__main__":
     main()
