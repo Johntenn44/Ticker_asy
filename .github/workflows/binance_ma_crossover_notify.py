@@ -14,7 +14,7 @@ COINS = [
 ]
 
 EXCHANGE_ID = 'kucoin'
-INTERVALS = ['4h', '6h', '12h']
+INTERVALS = ['4h', '6h', '12h', '2h' , '1h']
 LOOKBACK = 500
 LEVERAGE = 10
 
