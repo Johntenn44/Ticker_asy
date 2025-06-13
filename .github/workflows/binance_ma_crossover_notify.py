@@ -71,6 +71,7 @@ def analyze_trend(df):
     detected_trend = None
     confirmed_trend = None
 
+    # Uptrend condition + SAR confirmation
     if (E1 > cp1 > A1 > B1 > C1 > D1 > MA50_1) and (cp1 < MA200_1) and \
        (E2 > cp2 > A2 > B2 > C2 > D2 > MA50_2) and (cp2 < MA200_2):
         detected_trend = 'uptrend'
@@ -81,6 +82,7 @@ def analyze_trend(df):
         if sar_confirm:
             confirmed_trend = 'uptrend'
 
+    # Downtrend condition + SAR confirmation
     elif (E1 < cp1 < A1 < B1 < C1 < D1 < MA50_1) and (cp1 > MA200_1) and \
          (E2 < cp2 < A2 < B2 < C2 < D2 < MA50_2) and (cp2 > MA200_2):
         detected_trend = 'downtrend'
@@ -122,7 +124,6 @@ def backtest(df):
     position = None
     entry_price = 0.0
     entry_index = 0
-    touched_ma = None
 
     for i in range(200, len(df)):
         window_df = df.iloc[:i+1]
@@ -131,6 +132,7 @@ def backtest(df):
         if 'detected_trend' in trend:
             current_trend = trend['detected_trend']
             if position != current_trend:
+                # Close previous position if any
                 if position is not None:
                     exit_price = df['close'].iloc[i-1]
                     profit = (exit_price - entry_price) if position == 'uptrend' else (entry_price - exit_price)
@@ -143,61 +145,51 @@ def backtest(df):
                         'exit_price': exit_price,
                         'profit': profit
                     })
+                # Enter new position
                 position = current_trend
                 entry_price = df['close'].iloc[i]
                 entry_index = i
-                touched_ma = None
         else:
             if position is not None:
-                if touched_ma is None:
-                    price_since_entry = df['close'].iloc[entry_index:i+1]
-                    ema200_since_entry = df['EMA200'].iloc[entry_index:i+1]
-                    ma200_since_entry = df['MA200'].iloc[entry_index:i+1]
+                sar_val = df['SAR'].iloc[i]
+                ema200_val = df['EMA200'].iloc[i]
+                ma200_val = df['MA200'].iloc[i]
 
-                    if (price_since_entry <= ema200_since_entry).any():
-                        touched_ma = 'EMA200'
-                    elif (price_since_entry <= ma200_since_entry).any():
-                        touched_ma = 'MA200'
+                # Exit if SAR crosses above or below EMA200 or MA200 regardless of price touching
+                if position == 'uptrend' and (sar_val > ema200_val or sar_val > ma200_val):
+                    exit_price = df['close'].iloc[i]
+                    profit = (exit_price - entry_price) * LEVERAGE
+                    trades.append({
+                        'entry_index': entry_index,
+                        'exit_index': i,
+                        'position': position,
+                        'entry_price': entry_price,
+                        'exit_price': exit_price,
+                        'profit': profit
+                    })
+                    position = None
 
-                if touched_ma:
-                    sar_val = df['SAR'].iloc[i]
-                    ma_val = df[touched_ma].iloc[i]
+                elif position == 'downtrend' and (sar_val < ema200_val or sar_val < ma200_val):
+                    exit_price = df['close'].iloc[i]
+                    profit = (entry_price - exit_price) * LEVERAGE
+                    trades.append({
+                        'entry_index': entry_index,
+                        'exit_index': i,
+                        'position': position,
+                        'entry_price': entry_price,
+                        'exit_price': exit_price,
+                        'profit': profit
+                    })
+                    position = None
 
-                    if position == 'uptrend' and sar_val > ma_val:
-                        exit_price = df['close'].iloc[i]
-                        profit = (exit_price - entry_price) * LEVERAGE
-                        trades.append({
-                            'entry_index': entry_index,
-                            'exit_index': i,
-                            'position': position,
-                            'entry_price': entry_price,
-                            'exit_price': exit_price,
-                            'profit': profit
-                        })
-                        position = None
-                        touched_ma = None
-
-                    elif position == 'downtrend' and sar_val < ma_val:
-                        exit_price = df['close'].iloc[i]
-                        profit = (entry_price - exit_price) * LEVERAGE
-                        trades.append({
-                            'entry_index': entry_index,
-                            'exit_index': i,
-                            'position': position,
-                            'entry_price': entry_price,
-                            'exit_price': exit_price,
-                            'profit': profit
-                        })
-                        position = None
-                        touched_ma = None
-
+    # Close any open position at the last candle
     if position is not None:
         exit_price = df['close'].iloc[-1]
         profit = (exit_price - entry_price) if position == 'uptrend' else (entry_price - exit_price)
         profit *= LEVERAGE
         trades.append({
             'entry_index': entry_index,
-            'exit_index': len(df)-1,
+            'exit_index': len(df) - 1,
             'position': position,
             'entry_price': entry_price,
             'exit_price': exit_price,
