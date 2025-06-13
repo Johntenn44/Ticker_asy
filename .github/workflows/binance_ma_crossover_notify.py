@@ -14,7 +14,7 @@ COINS = [
 ]
 
 EXCHANGE_ID = 'kucoin'
-INTERVALS = ['1h' , '2h']
+INTERVALS = ['4h','2h']
 LOOKBACK = 500
 LEVERAGE = 10
 
@@ -72,27 +72,17 @@ def send_telegram_message(message):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("Telegram bot token or chat ID not set in environment variables.")
         return
-
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    max_length = 4000  # Telegram max is 4096, leaving margin
-
-    # Split message into chunks
-    message_blocks = [message[i:i+max_length] for i in range(0, len(message), max_length)]
-
-    for idx, block in enumerate(message_blocks, 1):
-        payload = {
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": block,
-            "parse_mode": "HTML"
-        }
-        resp = requests.post(url, data=payload)
-        try:
-            resp.raise_for_status()
-            print(f"Telegram message block {idx}/{len(message_blocks)} sent successfully.")
-        except Exception as e:
-            print(f"Failed to send Telegram message block {idx}: {e}")
-            print(f"Response content: {resp.text}")
-            break
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML"
+    }
+    resp = requests.post(url, data=payload)
+    try:
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"Failed to send Telegram message: {e}")
 
 # --- BACKTESTING ---
 
@@ -210,12 +200,13 @@ def main():
             except Exception as e:
                 print(f"Error processing {symbol} {interval}: {e}")
 
+    # Sort the report entries chronologically by earliest trade entry
     report_entries.sort(key=lambda x: x[0])
     all_messages = [entry[1] for entry in report_entries]
 
     if all_messages:
         now = datetime.utcnow()
-        four_days_ago = now - timedelta(days=6)
+        four_days_ago = now - timedelta(days=4)
         header = (f"<b>Backtest results for the period:</b> "
                   f"{four_days_ago.strftime('%Y-%m-%d %H:%M')} UTC to {now.strftime('%Y-%m-%d %H:%M')} UTC\n\n")
         full_message = header + "\n\n".join(all_messages)
