@@ -71,27 +71,26 @@ def analyze_trend(df):
     detected_trend = None
     confirmed_trend = None
 
-    # Uptrend condition + SAR confirmation
-    if (E1 > cp1 > A1 > B1 > C1 > D1 > MA50_1) and (cp1 < MA200_1) and \
-       (E2 > cp2 > A2 > B2 > C2 > D2 > MA50_2) and (cp2 < MA200_2):
-        detected_trend = 'uptrend'
-        sar_confirm = all(
-            df['SAR'].iloc[-i] > df['BB_UPPER'].iloc[-i]
-            for i in range(1, 4)
-        )
-        if sar_confirm:
-            confirmed_trend = 'uptrend'
+    # Confirm downtrend only if last 3 SAR > MA50
+    downtrend_confirm = all(
+        df['SAR'].iloc[-i] > df['MA50'].iloc[-i]
+        for i in range(1, 4)
+    )
+    # Confirm uptrend only if last 3 SAR < MA50
+    uptrend_confirm = all(
+        df['SAR'].iloc[-i] < df['MA50'].iloc[-i]
+        for i in range(1, 4)
+    )
 
-    # Downtrend condition + SAR confirmation
-    elif (E1 < cp1 < A1 < B1 < C1 < D1 < MA50_1) and (cp1 > MA200_1) and \
-         (E2 < cp2 < A2 < B2 < C2 < D2 < MA50_2) and (cp2 > MA200_2):
+    if (E1 < cp1 < A1 < B1 < C1 < D1 < MA50_1) and (cp1 > MA200_1) and \
+       (E2 < cp2 < A2 < B2 < C2 < D2 < MA50_2) and (cp2 > MA200_2) and downtrend_confirm:
         detected_trend = 'downtrend'
-        sar_confirm = all(
-            df['SAR'].iloc[-i] < df['BB_LOWER'].iloc[-i]
-            for i in range(1, 4)
-        )
-        if sar_confirm:
-            confirmed_trend = 'downtrend'
+        confirmed_trend = 'downtrend'
+
+    elif (E1 > cp1 > A1 > B1 > C1 > D1 > MA50_1) and (cp1 < MA200_1) and \
+         (E2 > cp2 > A2 > B2 > C2 > D2 > MA50_2) and (cp2 < MA200_2) and uptrend_confirm:
+        detected_trend = 'uptrend'
+        confirmed_trend = 'uptrend'
 
     result = {}
     if detected_trend:
@@ -130,7 +129,8 @@ def backtest(df):
         trend = analyze_trend(window_df)
 
         if 'detected_trend' in trend:
-            if position != trend['detected_trend']:
+            current_trend = trend['detected_trend']
+            if position != current_trend:
                 if position is not None:
                     exit_price = df['close'].iloc[i-1]
                     profit = (exit_price - entry_price) if position == 'uptrend' else (entry_price - exit_price)
@@ -143,23 +143,40 @@ def backtest(df):
                         'exit_price': exit_price,
                         'profit': profit
                     })
-                position = trend['detected_trend']
+                position = current_trend
                 entry_price = df['close'].iloc[i]
                 entry_index = i
         else:
             if position is not None:
-                exit_price = df['close'].iloc[i]
-                profit = (exit_price - entry_price) if position == 'uptrend' else (entry_price - exit_price)
-                profit *= LEVERAGE
-                trades.append({
-                    'entry_index': entry_index,
-                    'exit_index': i,
-                    'position': position,
-                    'entry_price': entry_price,
-                    'exit_price': exit_price,
-                    'profit': profit
-                })
-                position = None
+                sar_val = df['SAR'].iloc[i]
+                ema200_val = df['EMA200'].iloc[i]
+                ma200_val = df['MA200'].iloc[i]
+
+                if position == 'uptrend' and (sar_val > ema200_val or sar_val > ma200_val):
+                    exit_price = df['close'].iloc[i]
+                    profit = (exit_price - entry_price) * LEVERAGE
+                    trades.append({
+                        'entry_index': entry_index,
+                        'exit_index': i,
+                        'position': position,
+                        'entry_price': entry_price,
+                        'exit_price': exit_price,
+                        'profit': profit
+                    })
+                    position = None
+
+                elif position == 'downtrend' and (sar_val < ema200_val or sar_val < ma200_val):
+                    exit_price = df['close'].iloc[i]
+                    profit = (entry_price - exit_price) * LEVERAGE
+                    trades.append({
+                        'entry_index': entry_index,
+                        'exit_index': i,
+                        'position': position,
+                        'entry_price': entry_price,
+                        'exit_price': exit_price,
+                        'profit': profit
+                    })
+                    position = None
 
     if position is not None:
         exit_price = df['close'].iloc[-1]
@@ -175,36 +192,6 @@ def backtest(df):
         })
 
     return trades
-
-def filter_trades_last_4_days(trades, df):
-    now = datetime.utcnow()
-    four_days_ago = now - timedelta(days=4)
-    return [t for t in trades if df.index[t['entry_index']] >= four_days_ago]
-
-def format_backtest_summary(symbol, trades, df, interval):
-    total_profit = sum(t['profit'] for t in trades)
-    num_trades = len(trades)
-    wins = sum(1 for t in trades if t['profit'] > 0)
-    losses = num_trades - wins
-    win_rate = (wins / num_trades * 100) if num_trades > 0 else 0
-
-    msg = f"📊 <b>Backtest Summary for {symbol} ({interval})</b>\n"
-    msg += f"🕒 Trades in last 4 days: <code>{num_trades}</code>\n"
-    msg += f"✅ Wins: <b>{wins}</b> | ❌ Losses: <b>{losses}</b> | 🎯 Win Rate: <b>{win_rate:.2f}%</b>\n"
-    msg += f"💰 Total Profit (price units): <code>{total_profit:.4f}</code>\n"
-    msg += "📈 <b>Trades details:</b>\n"
-
-    for i, t in enumerate(trades, 1):
-        entry_date = df.index[t['entry_index']].strftime('%Y-%m-%d %H:%M')
-        exit_date = df.index[t['exit_index']].strftime('%Y-%m-%d %H:%M')
-        position_emoji = "📈" if t['position'] == 'uptrend' else "📉"
-        msg += (f"{i}. {position_emoji} <b>{t['position'].capitalize()}</b> | "
-                f"Entry: <code>{entry_date}</code> @ <code>{t['entry_price']:.4f}</code> | "
-                f"Exit: <code>{exit_date}</code> @ <code>{t['exit_price']:.4f}</code> | "
-                f"Profit: <code>{t['profit']:.4f}</code>\n")
-
-    msg += "----------------------------------------"
-    return msg
 
 # --- TELEGRAM NOTIFICATION ---
 
@@ -240,7 +227,7 @@ def main():
                     continue
                 df = add_indicators(df)
                 trades = backtest(df)
-                trades_recent = filter_trades_last_4_days(trades, df)
+                trades_recent = [t for t in trades if df.index[t['entry_index']] >= datetime.utcnow() - timedelta(days=4)]
 
                 if trades_recent:
                     entry_times = [df.index[t['entry_index']] for t in trades_recent]
@@ -252,7 +239,6 @@ def main():
             except Exception as e:
                 print(f"Error processing {symbol} {interval}: {e}")
 
-    # Sort the report entries chronologically by earliest trade entry
     report_entries.sort(key=lambda x: x[0])
     all_messages = [entry[1] for entry in report_entries]
 
@@ -265,6 +251,31 @@ def main():
         send_telegram_message(full_message)
     else:
         send_telegram_message("No backtest results available for the past 4 days.")
+
+def format_backtest_summary(symbol, trades, df, interval):
+    total_profit = sum(t['profit'] for t in trades)
+    num_trades = len(trades)
+    wins = sum(1 for t in trades if t['profit'] > 0)
+    losses = num_trades - wins
+    win_rate = (wins / num_trades * 100) if num_trades > 0 else 0
+
+    msg = f"📊 <b>Backtest Summary for {symbol} ({interval})</b>\n"
+    msg += f"🕒 Trades in last 4 days: <code>{num_trades}</code>\n"
+    msg += f"✅ Wins: <b>{wins}</b> | ❌ Losses: <b>{losses}</b> | 🎯 Win Rate: <b>{win_rate:.2f}%</b>\n"
+    msg += f"💰 Total Profit (price units): <code>{total_profit:.4f}</code>\n"
+    msg += "📈 <b>Trades details:</b>\n"
+
+    for i, t in enumerate(trades, 1):
+        entry_date = df.index[t['entry_index']].strftime('%Y-%m-%d %H:%M')
+        exit_date = df.index[t['exit_index']].strftime('%Y-%m-%d %H:%M')
+        position_emoji = "📈" if t['position'] == 'uptrend' else "📉"
+        msg += (f"{i}. {position_emoji} <b>{t['position'].capitalize()}</b> | "
+                f"Entry: <code>{entry_date}</code> @ <code>{t['entry_price']:.4f}</code> | "
+                f"Exit: <code>{exit_date}</code> @ <code>{t['exit_price']:.4f}</code> | "
+                f"Profit: <code>{t['profit']:.4f}</code>\n")
+
+    msg += "----------------------------------------"
+    return msg
 
 if __name__ == "__main__":
     main()
