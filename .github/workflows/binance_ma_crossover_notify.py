@@ -3,7 +3,6 @@ import ccxt
 import pandas as pd
 import requests
 from datetime import datetime, timedelta
-import ta
 
 # --- CONFIGURATION ---
 
@@ -32,74 +31,27 @@ def add_indicators(df):
     df['EMA200'] = df['close'].ewm(span=200, adjust=False).mean()
     df['MA50'] = df['close'].rolling(window=50).mean()
     df['MA200'] = df['close'].rolling(window=200).mean()
-
-    bb = ta.volatility.BollingerBands(close=df['close'], window=50, window_dev=2)
-    df['BB_MID'] = bb.bollinger_mavg()
-    df['BB_UPPER'] = bb.bollinger_hband()
-    df['BB_LOWER'] = bb.bollinger_lband()
-
-    psar = ta.trend.PSARIndicator(high=df['high'], low=df['low'], close=df['close'], step=0.02, max_step=0.2)
-    df['SAR'] = psar.psar()
-
     return df
 
 # --- TREND LOGIC ---
 
 def analyze_trend(df):
-    if len(df) < 3:
+    if len(df) < 2:
         return {}
 
-    cp1 = df['close'].iloc[-1]
-    cp2 = df['close'].iloc[-2]
+    cp1, cp2 = df['close'].iloc[-1], df['close'].iloc[-2]
+    A1, B1, C1, D1, E1 = df['EMA8'].iloc[-1], df['EMA13'].iloc[-1], df['EMA21'].iloc[-1], df['EMA50'].iloc[-1], df['EMA200'].iloc[-1]
+    MA50_1, MA200_1 = df['MA50'].iloc[-1], df['MA200'].iloc[-1]
+    A2, B2, C2, D2, E2 = df['EMA8'].iloc[-2], df['EMA13'].iloc[-2], df['EMA21'].iloc[-2], df['EMA50'].iloc[-2], df['EMA200'].iloc[-2]
+    MA50_2, MA200_2 = df['MA50'].iloc[-2], df['MA200'].iloc[-2]
 
-    A1 = df['EMA8'].iloc[-1]
-    B1 = df['EMA13'].iloc[-1]
-    C1 = df['EMA21'].iloc[-1]
-    D1 = df['EMA50'].iloc[-1]
-    E1 = df['EMA200'].iloc[-1]
-    MA50_1 = df['MA50'].iloc[-1]
-    MA200_1 = df['MA200'].iloc[-1]
-
-    A2 = df['EMA8'].iloc[-2]
-    B2 = df['EMA13'].iloc[-2]
-    C2 = df['EMA21'].iloc[-2]
-    D2 = df['EMA50'].iloc[-2]
-    E2 = df['EMA200'].iloc[-2]
-    MA50_2 = df['MA50'].iloc[-2]
-    MA200_2 = df['MA200'].iloc[-2]
-
-    detected_trend = None
-    confirmed_trend = None
-
-    # Confirm downtrend only if last 3 SAR > Bollinger upper band
-    downtrend_confirm = all(
-        df['SAR'].iloc[-i] > df['BB_UPPER'].iloc[-i]
-        for i in range(1, 4)
-    )
-    # Confirm uptrend only if last 3 SAR < Bollinger lower band
-    uptrend_confirm = all(
-        df['SAR'].iloc[-i] < df['BB_LOWER'].iloc[-i]
-        for i in range(1, 4)
-    )
-
-    if (E1 < cp1 < A1 < B1 < C1 < D1 < MA50_1) and (cp1 > MA200_1) and \
-       (E2 < cp2 < A2 < B2 < C2 < D2 < MA50_2) and (cp2 > MA200_2) and downtrend_confirm:
-        detected_trend = 'downtrend'
-        confirmed_trend = 'downtrend'
-
-    elif (E1 > cp1 > A1 > B1 > C1 > D1 > MA50_1) and (cp1 < MA200_1) and \
-         (E2 > cp2 > A2 > B2 > C2 > D2 > MA50_2) and (cp2 < MA200_2) and uptrend_confirm:
-        detected_trend = 'uptrend'
-        confirmed_trend = 'uptrend'
-
-    result = {}
-    if detected_trend:
-        result['detected_trend'] = detected_trend
-    if confirmed_trend:
-        result['confirmed_trend'] = confirmed_trend
-
-    result['values'] = {'cp1': cp1, 'cp2': cp2}
-    return result
+    if (E1 > cp1 > A1 > B1 > C1 > D1 > MA50_1) and (cp1 < MA200_1) and \
+       (E2 > cp2 > A2 > B2 > C2 > D2 > MA50_2) and (cp2 < MA200_2):
+        return {'start': 'uptrend'}
+    elif (E1 < cp1 < A1 < B1 < C1 < D1 < MA50_1) and (cp1 > MA200_1) and \
+         (E2 < cp2 < A2 < B2 < C2 < D2 < MA50_2) and (cp2 > MA200_2):
+        return {'start': 'downtrend'}
+    return {}
 
 # --- DATA FETCHING ---
 
@@ -112,9 +64,25 @@ def fetch_ohlcv_ccxt(symbol, timeframe, limit):
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     df.set_index('timestamp', inplace=True)
     df['close'] = df['close'].astype(float)
-    df['high'] = df['high'].astype(float)
-    df['low'] = df['low'].astype(float)
     return df
+
+# --- TELEGRAM NOTIFICATION ---
+
+def send_telegram_message(message):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Telegram bot token or chat ID not set in environment variables.")
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML"
+    }
+    resp = requests.post(url, data=payload)
+    try:
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"Failed to send Telegram message: {e}")
 
 # --- BACKTESTING ---
 
@@ -128,9 +96,8 @@ def backtest(df):
         window_df = df.iloc[:i+1]
         trend = analyze_trend(window_df)
 
-        if 'detected_trend' in trend:
-            current_trend = trend['detected_trend']
-            if position != current_trend:
+        if 'start' in trend:
+            if position != trend['start']:
                 if position is not None:
                     exit_price = df['close'].iloc[i-1]
                     profit = (exit_price - entry_price) if position == 'uptrend' else (entry_price - exit_price)
@@ -143,40 +110,23 @@ def backtest(df):
                         'exit_price': exit_price,
                         'profit': profit
                     })
-                position = current_trend
+                position = trend['start']
                 entry_price = df['close'].iloc[i]
                 entry_index = i
         else:
             if position is not None:
-                sar_val = df['SAR'].iloc[i]
-                ema200_val = df['EMA200'].iloc[i]
-                ma200_val = df['MA200'].iloc[i]
-
-                if position == 'uptrend' and (sar_val > ema200_val or sar_val > ma200_val):
-                    exit_price = df['close'].iloc[i]
-                    profit = (exit_price - entry_price) * LEVERAGE
-                    trades.append({
-                        'entry_index': entry_index,
-                        'exit_index': i,
-                        'position': position,
-                        'entry_price': entry_price,
-                        'exit_price': exit_price,
-                        'profit': profit
-                    })
-                    position = None
-
-                elif position == 'downtrend' and (sar_val < ema200_val or sar_val < ma200_val):
-                    exit_price = df['close'].iloc[i]
-                    profit = (entry_price - exit_price) * LEVERAGE
-                    trades.append({
-                        'entry_index': entry_index,
-                        'exit_index': i,
-                        'position': position,
-                        'entry_price': entry_price,
-                        'exit_price': exit_price,
-                        'profit': profit
-                    })
-                    position = None
+                exit_price = df['close'].iloc[i]
+                profit = (exit_price - entry_price) if position == 'uptrend' else (entry_price - exit_price)
+                profit *= LEVERAGE
+                trades.append({
+                    'entry_index': entry_index,
+                    'exit_index': i,
+                    'position': position,
+                    'entry_price': entry_price,
+                    'exit_price': exit_price,
+                    'profit': profit
+                })
+                position = None
 
     if position is not None:
         exit_price = df['close'].iloc[-1]
@@ -223,22 +173,7 @@ def format_backtest_summary(symbol, trades, df, interval):
     msg += "----------------------------------------"
     return msg
 
-def send_telegram_message(message):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Telegram bot token or chat ID not set in environment variables.")
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
-        "parse_mode": "HTML"
-    }
-    resp = requests.post(url, data=payload)
-    try:
-        resp.raise_for_status()
-        print("Telegram message sent.")
-    except Exception as e:
-        print(f"Failed to send Telegram message: {e}")
+# --- MAIN ---
 
 def main():
     report_entries = []
@@ -265,12 +200,13 @@ def main():
             except Exception as e:
                 print(f"Error processing {symbol} {interval}: {e}")
 
+    # Sort the report entries chronologically by earliest trade entry
     report_entries.sort(key=lambda x: x[0])
     all_messages = [entry[1] for entry in report_entries]
 
     if all_messages:
         now = datetime.utcnow()
-        four_days_ago = now - timedelta(days=14)
+        four_days_ago = now - timedelta(days=4)
         header = (f"<b>Backtest results for the period:</b> "
                   f"{four_days_ago.strftime('%Y-%m-%d %H:%M')} UTC to {now.strftime('%Y-%m-%d %H:%M')} UTC\n\n")
         full_message = header + "\n\n".join(all_messages)
