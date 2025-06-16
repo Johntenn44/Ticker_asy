@@ -14,7 +14,7 @@ COINS = [
 ]
 
 EXCHANGE_ID = 'kucoin'
-INTERVALS = ['4h', '6h', '12h' , '1d']
+INTERVALS = ['1d']
 LOOKBACK = 500
 LEVERAGE = 10
 
@@ -206,7 +206,7 @@ def main():
 
     if all_messages:
         now = datetime.utcnow()
-        four_days_ago = now - timedelta(days=4)
+        four_days_ago = now - timedelta(days=60)
         header = (f"<b>Backtest results for the period:</b> "
                   f"{four_days_ago.strftime('%Y-%m-%d %H:%M')} UTC to {now.strftime('%Y-%m-%d %H:%M')} UTC\n\n")
         full_message = header + "\n\n".join(all_messages)
