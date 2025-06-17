@@ -14,7 +14,7 @@ COINS = [
 ]
 
 EXCHANGE_ID = 'kucoin'
-INTERVAL = '12h'      # Candle timeframe
+INTERVAL = '1h'      # Candle timeframe
 LOOKBACK = 500       # Number of candles to fetch (>= 200)
 LEVERAGE = 10
 
