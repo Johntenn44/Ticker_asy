@@ -14,7 +14,7 @@ COINS = [
 ]
 
 EXCHANGE_ID = 'kucoin'
-INTERVALS = ['1d', '12h'] # Multiple intervals
+INTERVALS = ['1d', '12h']  # Multiple intervals
 LOOKBACK = 500
 LEVERAGE = 10
 
@@ -31,6 +31,7 @@ RSI_PERIODS = [5, 13, 21]
 WR_PERIODS = [8, 13, 50, 200]
 
 # --- INDICATOR CALCULATION ---
+
 
 def add_indicators(df):
     df['EMA8'] = df['close'].ewm(span=8, adjust=False).mean()
@@ -51,19 +52,21 @@ def add_indicators(df):
 
     return df
 
+
 def add_kdj(df, length=5, ma1=8, ma2=8):
     low_min = df['low'].rolling(window=length, min_periods=1).min()
     high_max = df['high'].rolling(window=length, min_periods=1).max()
     rsv = (df['close'] - low_min) / (high_max - low_min).replace(0, 0.0001) * 100
 
-    k = rsv.ewm(alpha=1/ma1, adjust=False).mean()
-    d = k.ewm(alpha=1/ma2, adjust=False).mean()
+    k = rsv.ewm(alpha=1 / ma1, adjust=False).mean()
+    d = k.ewm(alpha=1 / ma2, adjust=False).mean()
     j = 3 * k - 2 * d
 
     df['K'] = k
     df['D'] = d
     df['J'] = j
     return df
+
 
 def rsi(series, period):
     delta = series.diff()
@@ -75,13 +78,16 @@ def rsi(series, period):
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
+
 def williams_r(high, low, close, period):
     highest_high = high.rolling(window=period, min_periods=period).max()
     lowest_low = low.rolling(window=period, min_periods=period).min()
     wr = -100 * (highest_high - close) / (highest_high - lowest_low).replace(0, 0.0001)
     return wr
 
+
 # --- TREND LOGIC ---
+
 
 def analyze_trend(df):
     results = {}
@@ -95,13 +101,17 @@ def analyze_trend(df):
     ma200 = df['MA200'].iloc[-1]
     ema200 = df['EMA200'].iloc[-1]
 
-    prereq = all([
-        cp <= ma50, cp <= ma200, cp <= ema200,
-        ema8 <= ma50, ema8 <= ma200, ema8 <= ema200,
-        ema13 <= ma50, ema13 <= ma200, ema13 <= ema200,
-        ema21 <= ma50, ema21 <= ma200, ema21 <= ema200,
-        ema50 <= ma50, ema50 <= ma200, ema50 <= ema200
-    ])
+    # Collect values to check
+    values = [cp, ema8, ema13, ema21, ema50]
+
+    # Check if all values are greater than all three moving averages
+    all_greater = all(v > ma50 and v > ma200 and v > ema200 for v in values)
+
+    # Check if all values are less than all three moving averages
+    all_less = all(v < ma50 and v < ma200 and v < ema200 for v in values)
+
+    # prereq is True if NOT all greater and NOT all less
+    prereq = not (all_greater or all_less)
 
     K = df['K'].iloc[-1]
     D = df['D'].iloc[-1]
@@ -170,7 +180,9 @@ def analyze_trend(df):
 
     return results
 
+
 # --- DATA FETCHING ---
+
 
 def fetch_ohlcv_ccxt(symbol, timeframe, limit):
     exchange = getattr(ccxt, EXCHANGE_ID)()
@@ -181,10 +193,13 @@ def fetch_ohlcv_ccxt(symbol, timeframe, limit):
     )
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     df.set_index('timestamp', inplace=True)
-    df[['open','high','low','close','volume']] = df[['open','high','low','close','volume']].astype(float)
+    df[['open', 'high', 'low', 'close', 'volume']] = df[
+        ['open', 'high', 'low', 'close', 'volume']].astype(float)
     return df
 
+
 # --- TELEGRAM NOTIFICATION ---
+
 
 def send_telegram_message(message):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -202,7 +217,9 @@ def send_telegram_message(message):
     except Exception as e:
         print(f"Failed to send Telegram message: {e}")
 
+
 # --- BACKTESTING ---
+
 
 def backtest(df):
     trades = []
@@ -211,18 +228,18 @@ def backtest(df):
     entry_index = 0
 
     for i in range(200, len(df)):
-        window_df = df.iloc[:i+1]
+        window_df = df.iloc[:i + 1]
         trend = analyze_trend(window_df)
 
         if 'start' in trend:
             if position != trend['start']:
                 if position is not None:
-                    exit_price = df['close'].iloc[i-1]
+                    exit_price = df['close'].iloc[i - 1]
                     profit = (exit_price - entry_price) if position == 'uptrend' else (entry_price - exit_price)
                     profit *= LEVERAGE
                     trades.append({
                         'entry_index': entry_index,
-                        'exit_index': i-1,
+                        'exit_index': i - 1,
                         'position': position,
                         'entry_price': entry_price,
                         'exit_price': exit_price,
@@ -252,7 +269,7 @@ def backtest(df):
         profit *= LEVERAGE
         trades.append({
             'entry_index': entry_index,
-            'exit_index': len(df)-1,
+            'exit_index': len(df) - 1,
             'position': position,
             'entry_price': entry_price,
             'exit_price': exit_price,
@@ -261,10 +278,12 @@ def backtest(df):
 
     return trades
 
+
 def filter_trades_last_4_days(trades, df):
     now = datetime.utcnow()
     four_days_ago = now - timedelta(days=4)
     return [t for t in trades if df.index[t['entry_index']] >= four_days_ago]
+
 
 def format_backtest_summary(symbol, trades, df, interval):
     total_profit = sum(t['profit'] for t in trades)
@@ -291,7 +310,9 @@ def format_backtest_summary(symbol, trades, df, interval):
     msg += "----------------------------------------"
     return msg
 
+
 # --- MAIN ---
+
 
 def main():
     report_entries = []
@@ -334,6 +355,7 @@ def main():
         send_telegram_message(full_message)
     else:
         send_telegram_message("No backtest results available for the past 4 days.")
+
 
 if __name__ == "__main__":
     main()
