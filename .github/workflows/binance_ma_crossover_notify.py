@@ -281,7 +281,7 @@ def backtest(df):
 
 def filter_trades_last_4_days(trades, df):
     now = datetime.utcnow()
-    four_days_ago = now - timedelta(days=4)
+    four_days_ago = now - timedelta(days=30)
     return [t for t in trades if df.index[t['entry_index']] >= four_days_ago]
 
 
