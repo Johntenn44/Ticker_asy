@@ -14,7 +14,7 @@ COINS = [
 ]
 
 EXCHANGE_ID = 'kucoin'
-INTERVALS = ['1d', '12h', '6h']  # Multiple intervals
+INTERVALS = ['1d', '12h']  # Multiple intervals
 LOOKBACK = 500
 LEVERAGE = 10
 
@@ -101,17 +101,17 @@ def analyze_trend(df):
     ma200 = df['MA200'].iloc[-1]
     ema200 = df['EMA200'].iloc[-1]
 
-    # Collect values to check
     values = [cp, ema8, ema13, ema21, ema50]
+    ma_values = [ma50, ma200, ema200]
 
-    # Check if all values are greater than all three moving averages
-    all_greater = all(v > ma50 and v > ma200 and v > ema200 for v in values)
+    # Check if all values are strictly above all MAs
+    all_above = all(all(v > ma for ma in ma_values) for v in values)
 
-    # Check if all values are less than all three moving averages
-    all_less = all(v < ma50 and v < ma200 and v < ema200 for v in values)
+    # Check if all values are strictly below all MAs
+    all_below = all(all(v < ma for ma in ma_values) for v in values)
 
-    # prereq is True if NOT all greater and NOT all less
-    prereq = not (all_greater or all_less)
+    # prereq is True if values are NOT all above or all below all MAs
+    prereq = not (all_above or all_below)
 
     K = df['K'].iloc[-1]
     D = df['D'].iloc[-1]
@@ -281,7 +281,7 @@ def backtest(df):
 
 def filter_trades_last_4_days(trades, df):
     now = datetime.utcnow()
-    four_days_ago = now - timedelta(days=15)
+    four_days_ago = now - timedelta(days=4)
     return [t for t in trades if df.index[t['entry_index']] >= four_days_ago]
 
 
