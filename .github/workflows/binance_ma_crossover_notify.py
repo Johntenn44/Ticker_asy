@@ -14,8 +14,8 @@ COINS = [
 ]
 
 EXCHANGE_ID = 'kucoin'
-INTERVAL = ['1h' , '4h' , '6h' , '12h']      # Candle timeframe
-LOOKBACK = 500       # Number of candles to fetch (>= 200)
+INTERVALS = ['1h', '4h', '6h', '12h']  # Multiple intervals
+LOOKBACK = 500
 LEVERAGE = 10
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -33,7 +33,6 @@ WR_PERIODS = [8, 13, 50, 200]
 # --- INDICATOR CALCULATION ---
 
 def add_indicators(df):
-    # EMAs and MAs
     df['EMA8'] = df['close'].ewm(span=8, adjust=False).mean()
     df['EMA13'] = df['close'].ewm(span=13, adjust=False).mean()
     df['EMA21'] = df['close'].ewm(span=21, adjust=False).mean()
@@ -42,14 +41,11 @@ def add_indicators(df):
     df['MA50'] = df['close'].rolling(window=50).mean()
     df['MA200'] = df['close'].rolling(window=200).mean()
 
-    # KDJ indicator
     df = add_kdj(df, length=KDJ_LENGTH, ma1=KDJ_MA1, ma2=KDJ_MA2)
 
-    # RSI indicators
     for period in RSI_PERIODS:
         df[f'RSI{period}'] = rsi(df['close'], period)
 
-    # Williams %R indicators
     for period in WR_PERIODS:
         df[f'WR{period}'] = williams_r(df['high'], df['low'], df['close'], period)
 
@@ -58,7 +54,7 @@ def add_indicators(df):
 def add_kdj(df, length=5, ma1=8, ma2=8):
     low_min = df['low'].rolling(window=length, min_periods=1).min()
     high_max = df['high'].rolling(window=length, min_periods=1).max()
-    rsv = (df['close'] - low_min) / (high_max - low_min).replace(0, 0.0001) * 100  # avoid div0
+    rsv = (df['close'] - low_min) / (high_max - low_min).replace(0, 0.0001) * 100
 
     k = rsv.ewm(alpha=1/ma1, adjust=False).mean()
     d = k.ewm(alpha=1/ma2, adjust=False).mean()
@@ -75,7 +71,7 @@ def rsi(series, period):
     loss = -delta.where(delta < 0, 0.0)
     avg_gain = gain.rolling(window=period, min_periods=period).mean()
     avg_loss = loss.rolling(window=period, min_periods=period).mean()
-    rs = avg_gain / avg_loss.replace(0, 0.0001)  # avoid div0
+    rs = avg_gain / avg_loss.replace(0, 0.0001)
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
@@ -90,8 +86,6 @@ def williams_r(high, low, close, period):
 def analyze_trend(df):
     results = {}
 
-    # Prerequisite condition:
-    # price, EMA8, EMA13, EMA21, EMA50 all NOT above MA50, MA200, or EMA200
     cp = df['close'].iloc[-1]
     ema8 = df['EMA8'].iloc[-1]
     ema13 = df['EMA13'].iloc[-1]
@@ -109,51 +103,50 @@ def analyze_trend(df):
         ema50 <= ma50, ema50 <= ma200, ema50 <= ema200
     ])
 
-    if not prereq:
-        return results  # Prerequisite not met, no trend identified
-
-    # KDJ values
     K = df['K'].iloc[-1]
     D = df['D'].iloc[-1]
     J = df['J'].iloc[-1]
 
-    # RSI values
     RSI5 = df['RSI5'].iloc[-1]
     RSI13 = df['RSI13'].iloc[-1]
     RSI21 = df['RSI21'].iloc[-1]
 
-    # Williams %R values
     WR8 = df['WR8'].iloc[-1]
     WR13 = df['WR13'].iloc[-1]
     WR50 = df['WR50'].iloc[-1]
     WR200 = df['WR200'].iloc[-1]
 
-    # Check KDJ trend condition
     kdj_up = (J > D > K)
     kdj_down = (K > D > J)
 
-    # Check RSI trend condition
     rsi_up = (RSI5 > RSI13 > RSI21)
     rsi_down = (RSI21 > RSI13 > RSI5)
 
-    # Check WR trend condition
     wr_up = (WR8 > WR13 > WR50 > WR200)
     wr_down = (WR200 > WR50 > WR13 > WR8)
 
-    # Check if trend ended: 8 and 13 WR between 50 and 200 (neutral zone)
     wr_end = (50 <= WR8 <= 200) and (50 <= WR13 <= 200)
 
-    # Identify trend start
-    if kdj_up and rsi_up and wr_up and not wr_end:
+    conditions_met = []
+    if prereq:
+        conditions_met.append("Prerequisite")
+    if kdj_up or kdj_down:
+        conditions_met.append("KDJ")
+    if rsi_up or rsi_down:
+        conditions_met.append("RSI")
+    if wr_up or wr_down or wr_end:
+        conditions_met.append("WR")
+
+    if prereq and kdj_up and rsi_up and wr_up and not wr_end:
         results['start'] = 'uptrend'
-    elif kdj_down and rsi_down and wr_down and not wr_end:
+    elif prereq and kdj_down and rsi_down and wr_down and not wr_end:
         results['start'] = 'downtrend'
 
-    # Identify trend end
     if wr_end:
         results['end'] = True
 
-    # Include indicator values for debugging/alerts
+    results['conditions_met'] = conditions_met
+
     results['values'] = {
         'close': cp,
         'EMA8': ema8,
@@ -304,33 +297,37 @@ def main():
     report_entries = []
 
     for symbol in COINS:
-        try:
-            print(f"Fetching data for {symbol} at interval {INTERVAL}...")
-            df = fetch_ohlcv_ccxt(symbol, INTERVAL, LOOKBACK)
-            if len(df) < 200:
-                print(f"Not enough data for {symbol}, skipping.")
-                continue
-            df = add_indicators(df)
-            trades = backtest(df)
-            trades_recent = filter_trades_last_4_days(trades, df)
+        for interval in INTERVALS:
+            try:
+                print(f"Fetching data for {symbol} at interval {interval}...")
+                df = fetch_ohlcv_ccxt(symbol, interval, LOOKBACK)
+                if len(df) < 200:
+                    print(f"Not enough data for {symbol} {interval}, skipping.")
+                    continue
+                df = add_indicators(df)
+                trades = backtest(df)
+                trades_recent = filter_trades_last_4_days(trades, df)
 
-            if trades_recent:
-                entry_times = [df.index[t['entry_index']] for t in trades_recent]
-                earliest_entry = min(entry_times)
-                summary_msg = format_backtest_summary(symbol, trades_recent, df, INTERVAL)
-                report_entries.append((earliest_entry, summary_msg))
-            else:
-                print(f"No trades in last 4 days for {symbol}, skipping report.")
-        except Exception as e:
-            print(f"Error processing {symbol}: {e}")
+                if trades_recent:
+                    entry_times = [df.index[t['entry_index']] for t in trades_recent]
+                    earliest_entry = min(entry_times)
+                    summary_msg = format_backtest_summary(symbol, trades_recent, df, interval)
+                    # Add conditions info from last trade's analyze_trend call
+                    last_trend = analyze_trend(df)
+                    conditions = ", ".join(last_trend.get('conditions_met', []))
+                    summary_msg += f"\n<b>Conditions met in last candle:</b> {conditions}"
+                    report_entries.append((earliest_entry, summary_msg))
+                else:
+                    print(f"No trades in last 4 days for {symbol} {interval}, skipping report.")
+            except Exception as e:
+                print(f"Error processing {symbol} {interval}: {e}")
 
-    # Sort the report entries chronologically by earliest trade entry
     report_entries.sort(key=lambda x: x[0])
     all_messages = [entry[1] for entry in report_entries]
 
     if all_messages:
         now = datetime.utcnow()
-        four_days_ago = now - timedelta(days=30)
+        four_days_ago = now - timedelta(days=4)
         header = (f"<b>Backtest results for the period:</b> "
                   f"{four_days_ago.strftime('%Y-%m-%d %H:%M')} UTC to {now.strftime('%Y-%m-%d %H:%M')} UTC\n\n")
         full_message = header + "\n\n".join(all_messages)
