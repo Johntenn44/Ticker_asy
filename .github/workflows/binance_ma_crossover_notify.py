@@ -14,24 +14,14 @@ COINS = [
 ]
 
 EXCHANGE_ID = 'kucoin'
-INTERVALS = ['1d', '12h', '6h' ]  # Multiple intervals
+INTERVALS = ['4h', '6h', '12h']
 LOOKBACK = 500
 LEVERAGE = 10
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# --- INDICATOR PARAMETERS ---
-
-KDJ_LENGTH = 5
-KDJ_MA1 = 8
-KDJ_MA2 = 8
-
-RSI_PERIODS = [5, 13, 21]
-WR_PERIODS = [8, 13, 50, 200]
-
-# --- INDICATOR CALCULATION ---
-
+# --- INDICATOR CALCULATIONS ---
 
 def add_indicators(df):
     df['EMA8'] = df['close'].ewm(span=8, adjust=False).mean()
@@ -42,164 +32,115 @@ def add_indicators(df):
     df['MA50'] = df['close'].rolling(window=50).mean()
     df['MA200'] = df['close'].rolling(window=200).mean()
 
-    df = add_kdj(df, length=KDJ_LENGTH, ma1=KDJ_MA1, ma2=KDJ_MA2)
-
-    for period in RSI_PERIODS:
-        df[f'RSI{period}'] = rsi(df['close'], period)
-
-    for period in WR_PERIODS:
-        df[f'WR{period}'] = williams_r(df['high'], df['low'], df['close'], period)
+    df = calculate_kdj(df)
+    df = calculate_rsi(df)
+    df = calculate_wr(df)
 
     return df
 
-
-def add_kdj(df, length=5, ma1=8, ma2=8):
-    low_min = df['low'].rolling(window=length, min_periods=1).min()
-    high_max = df['high'].rolling(window=length, min_periods=1).max()
-    rsv = (df['close'] - low_min) / (high_max - low_min).replace(0, 0.0001) * 100
-
-    k = rsv.ewm(alpha=1 / ma1, adjust=False).mean()
-    d = k.ewm(alpha=1 / ma2, adjust=False).mean()
-    j = 3 * k - 2 * d
-
-    df['K'] = k
-    df['D'] = d
-    df['J'] = j
+def calculate_kdj(df, length=5, ma1=8, ma2=8):
+    low_min = df['low'].rolling(window=length).min()
+    high_max = df['high'].rolling(window=length).max()
+    rsv = 100 * (df['close'] - low_min) / (high_max - low_min)
+    df['K'] = rsv.ewm(alpha=1/ma1, adjust=False).mean()
+    df['D'] = df['K'].ewm(alpha=1/ma2, adjust=False).mean()
+    df['J'] = 3 * df['K'] - 2 * df['D']
     return df
 
+def calculate_rsi(df, periods=[5, 13, 21]):
+    for period in periods:
+        delta = df['close'].diff()
+        gain = delta.where(delta > 0, 0)
+        loss = -delta.where(delta < 0, 0)
+        avg_gain = gain.rolling(window=period).mean()
+        avg_loss = loss.rolling(window=period).mean()
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        df[f'RSI_{period}'] = rsi
+    return df
 
-def rsi(series, period):
-    delta = series.diff()
-    gain = delta.where(delta > 0, 0.0)
-    loss = -delta.where(delta < 0, 0.0)
-    avg_gain = gain.rolling(window=period, min_periods=period).mean()
-    avg_loss = loss.rolling(window=period, min_periods=period).mean()
-    rs = avg_gain / avg_loss.replace(0, 0.0001)
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+def calculate_wr(df, periods=[8, 13, 50, 200]):
+    for period in periods:
+        highest_high = df['high'].rolling(window=period).max()
+        lowest_low = df['low'].rolling(window=period).min()
+        wr = -100 * (highest_high - df['close']) / (highest_high - lowest_low)
+        df[f'WR_{period}'] = wr
+    return df
 
+# --- PREREQUISITE FILTER ---
 
-def williams_r(high, low, close, period):
-    highest_high = high.rolling(window=period, min_periods=period).max()
-    lowest_low = low.rolling(window=period, min_periods=period).min()
-    wr = -100 * (highest_high - close) / (highest_high - lowest_low).replace(0, 0.0001)
-    return wr
+def is_coin_eligible(df):
+    last = df.iloc[-1]
 
+    key_values = [last['EMA8'], last['EMA13'], last['EMA21'], last['EMA50'], last['close']]
+    ma_values = [last['MA50'], last['MA200'], last['EMA200']]
 
-# --- TREND LOGIC ---
+    pairs = [(ma_values[0], ma_values[1]), (ma_values[0], ma_values[2]), (ma_values[1], ma_values[2])]
 
+    count = 0
+    for val in key_values:
+        between_pairs = sum(1 for (low, high) in pairs if min(low, high) <= val <= max(low, high))
+        if between_pairs >= 1:
+            count += 1
 
-def analyze_trend(df):
-    results = {}
+    return count >= 2
 
-    cp = df['close'].iloc[-1]
-    ema8 = df['EMA8'].iloc[-1]
-    ema13 = df['EMA13'].iloc[-1]
-    ema21 = df['EMA21'].iloc[-1]
-    ema50 = df['EMA50'].iloc[-1]
-    ma50 = df['MA50'].iloc[-1]
-    ma200 = df['MA200'].iloc[-1]
-    ema200 = df['EMA200'].iloc[-1]
+# --- TREND IDENTIFICATION ---
 
-    values = [cp, ema8, ema13, ema21, ema50]
-    ma_values = [ma50, ma200, ema200]
+def identify_trend(df):
+    if len(df) < 1:
+        return None
 
-    # Check if all values are strictly above all MAs
-    all_above = all(all(v > ma for ma in ma_values) for v in values)
+    last = df.iloc[-1]
 
-    # Check if all values are strictly below all MAs
-    all_below = all(all(v < ma for ma in ma_values) for v in values)
+    if not is_coin_eligible(df):
+        return None
 
-    # prereq is True if values are NOT all above or all below all MAs
-    prereq = not (all_above or all_below)
+    # KDJ condition
+    k, d, j = last['K'], last['D'], last['J']
+    kdj_up = j > d > k
+    kdj_down = k > d > j
 
-    K = df['K'].iloc[-1]
-    D = df['D'].iloc[-1]
-    J = df['J'].iloc[-1]
+    # RSI condition
+    rsi5, rsi13, rsi21 = last['RSI_5'], last['RSI_13'], last['RSI_21']
+    rsi_up = rsi5 > rsi13 > rsi21
+    rsi_down = rsi21 > rsi13 > rsi5
 
-    RSI5 = df['RSI5'].iloc[-1]
-    RSI13 = df['RSI13'].iloc[-1]
-    RSI21 = df['RSI21'].iloc[-1]
+    # WR condition
+    wr8, wr13, wr50, wr200 = last['WR_8'], last['WR_13'], last['WR_50'], last['WR_200']
+    wr_up = wr8 > wr13 > wr50 > wr200
+    wr_down = wr200 > wr50 > wr13 > wr8
 
-    WR8 = df['WR8'].iloc[-1]
-    WR13 = df['WR13'].iloc[-1]
-    WR50 = df['WR50'].iloc[-1]
-    WR200 = df['WR200'].iloc[-1]
+    # Trend ended condition
+    wr_8_13_between = (min(wr50, wr200) <= wr8 <= max(wr50, wr200)) and (min(wr50, wr200) <= wr13 <= max(wr50, wr200))
 
-    kdj_up = (J > D > K)
-    kdj_down = (K > D > J)
+    if wr_8_13_between:
+        return {'end': True}
 
-    rsi_up = (RSI5 > RSI13 > RSI21)
-    rsi_down = (RSI21 > RSI13 > RSI5)
+    if kdj_up and rsi_up and wr_up:
+        return {'start': 'uptrend'}
+    elif kdj_down and rsi_down and wr_down:
+        return {'start': 'downtrend'}
 
-    wr_up = (WR8 > WR13 > WR50 > WR200)
-    wr_down = (WR200 > WR50 > WR13 > WR8)
-
-    wr_end = (50 <= WR8 <= 200) and (50 <= WR13 <= 200)
-
-    conditions_met = []
-    if prereq:
-        conditions_met.append("Prerequisite")
-    if kdj_up or kdj_down:
-        conditions_met.append("KDJ")
-    if rsi_up or rsi_down:
-        conditions_met.append("RSI")
-    if wr_up or wr_down or wr_end:
-        conditions_met.append("WR")
-
-    if prereq and kdj_up and rsi_up and wr_up and not wr_end:
-        results['start'] = 'uptrend'
-    elif prereq and kdj_down and rsi_down and wr_down and not wr_end:
-        results['start'] = 'downtrend'
-
-    if wr_end:
-        results['end'] = True
-
-    results['conditions_met'] = conditions_met
-
-    results['values'] = {
-        'close': cp,
-        'EMA8': ema8,
-        'EMA13': ema13,
-        'EMA21': ema21,
-        'EMA50': ema50,
-        'MA50': ma50,
-        'MA200': ma200,
-        'EMA200': ema200,
-        'K': K,
-        'D': D,
-        'J': J,
-        'RSI5': RSI5,
-        'RSI13': RSI13,
-        'RSI21': RSI21,
-        'WR8': WR8,
-        'WR13': WR13,
-        'WR50': WR50,
-        'WR200': WR200,
-    }
-
-    return results
-
+    return None
 
 # --- DATA FETCHING ---
-
 
 def fetch_ohlcv_ccxt(symbol, timeframe, limit):
     exchange = getattr(ccxt, EXCHANGE_ID)()
     exchange.load_markets()
-    ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
-    df = pd.DataFrame(
-        ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']
-    )
+    symbol_api = symbol.replace('/', '-')
+    if symbol_api not in exchange.symbols:
+        print(f"Symbol {symbol_api} not found on {EXCHANGE_ID}, skipping.")
+        return None
+    ohlcv = exchange.fetch_ohlcv(symbol_api, timeframe, limit=limit)
+    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     df.set_index('timestamp', inplace=True)
-    df[['open', 'high', 'low', 'close', 'volume']] = df[
-        ['open', 'high', 'low', 'close', 'volume']].astype(float)
+    df['close'] = df['close'].astype(float)
     return df
 
-
 # --- TELEGRAM NOTIFICATION ---
-
 
 def send_telegram_message(message):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -217,9 +158,7 @@ def send_telegram_message(message):
     except Exception as e:
         print(f"Failed to send Telegram message: {e}")
 
-
 # --- BACKTESTING ---
-
 
 def backtest(df):
     trades = []
@@ -228,27 +167,10 @@ def backtest(df):
     entry_index = 0
 
     for i in range(200, len(df)):
-        window_df = df.iloc[:i + 1]
-        trend = analyze_trend(window_df)
+        window_df = df.iloc[:i+1]
+        trend = identify_trend(window_df)
 
-        if 'start' in trend:
-            if position != trend['start']:
-                if position is not None:
-                    exit_price = df['close'].iloc[i - 1]
-                    profit = (exit_price - entry_price) if position == 'uptrend' else (entry_price - exit_price)
-                    profit *= LEVERAGE
-                    trades.append({
-                        'entry_index': entry_index,
-                        'exit_index': i - 1,
-                        'position': position,
-                        'entry_price': entry_price,
-                        'exit_price': exit_price,
-                        'profit': profit
-                    })
-                position = trend['start']
-                entry_price = df['close'].iloc[i]
-                entry_index = i
-        else:
+        if trend is None:
             if position is not None:
                 exit_price = df['close'].iloc[i]
                 profit = (exit_price - entry_price) if position == 'uptrend' else (entry_price - exit_price)
@@ -262,6 +184,41 @@ def backtest(df):
                     'profit': profit
                 })
                 position = None
+            continue
+
+        if 'end' in trend:
+            if position is not None:
+                exit_price = df['close'].iloc[i]
+                profit = (exit_price - entry_price) if position == 'uptrend' else (entry_price - exit_price)
+                profit *= LEVERAGE
+                trades.append({
+                    'entry_index': entry_index,
+                    'exit_index': i,
+                    'position': position,
+                    'entry_price': entry_price,
+                    'exit_price': exit_price,
+                    'profit': profit
+                })
+                position = None
+            continue
+
+        if 'start' in trend:
+            if position != trend['start']:
+                if position is not None:
+                    exit_price = df['close'].iloc[i-1]
+                    profit = (exit_price - entry_price) if position == 'uptrend' else (entry_price - exit_price)
+                    profit *= LEVERAGE
+                    trades.append({
+                        'entry_index': entry_index,
+                        'exit_index': i-1,
+                        'position': position,
+                        'entry_price': entry_price,
+                        'exit_price': exit_price,
+                        'profit': profit
+                    })
+                position = trend['start']
+                entry_price = df['close'].iloc[i]
+                entry_index = i
 
     if position is not None:
         exit_price = df['close'].iloc[-1]
@@ -269,7 +226,7 @@ def backtest(df):
         profit *= LEVERAGE
         trades.append({
             'entry_index': entry_index,
-            'exit_index': len(df) - 1,
+            'exit_index': len(df)-1,
             'position': position,
             'entry_price': entry_price,
             'exit_price': exit_price,
@@ -278,12 +235,10 @@ def backtest(df):
 
     return trades
 
-
 def filter_trades_last_4_days(trades, df):
     now = datetime.utcnow()
-    four_days_ago = now - timedelta(days=30)
+    four_days_ago = now - timedelta(days=4)
     return [t for t in trades if df.index[t['entry_index']] >= four_days_ago]
-
 
 def format_backtest_summary(symbol, trades, df, interval):
     total_profit = sum(t['profit'] for t in trades)
@@ -310,11 +265,11 @@ def format_backtest_summary(symbol, trades, df, interval):
     msg += "----------------------------------------"
     return msg
 
-
 # --- MAIN ---
 
-
 def main():
+    eligible_coins = set()
+    indicator_coins = set()
     report_entries = []
 
     for symbol in COINS:
@@ -322,21 +277,25 @@ def main():
             try:
                 print(f"Fetching data for {symbol} at interval {interval}...")
                 df = fetch_ohlcv_ccxt(symbol, interval, LOOKBACK)
-                if len(df) < 200:
+                if df is None or len(df) < 200:
                     print(f"Not enough data for {symbol} {interval}, skipping.")
                     continue
                 df = add_indicators(df)
+
+                if is_coin_eligible(df):
+                    eligible_coins.add(symbol)
+                else:
+                    print(f"{symbol} at {interval} does not meet EMA/MA positioning criteria, skipping.")
+                    continue
+
                 trades = backtest(df)
                 trades_recent = filter_trades_last_4_days(trades, df)
 
                 if trades_recent:
+                    indicator_coins.add(symbol)
                     entry_times = [df.index[t['entry_index']] for t in trades_recent]
                     earliest_entry = min(entry_times)
                     summary_msg = format_backtest_summary(symbol, trades_recent, df, interval)
-                    # Add conditions info from last trade's analyze_trend call
-                    last_trend = analyze_trend(df)
-                    conditions = ", ".join(last_trend.get('conditions_met', []))
-                    summary_msg += f"\n<b>Conditions met in last candle:</b> {conditions}"
                     report_entries.append((earliest_entry, summary_msg))
                 else:
                     print(f"No trades in last 4 days for {symbol} {interval}, skipping report.")
@@ -346,16 +305,23 @@ def main():
     report_entries.sort(key=lambda x: x[0])
     all_messages = [entry[1] for entry in report_entries]
 
+    eligible_list = ", ".join(sorted(eligible_coins)) if eligible_coins else "None"
+    indicator_list = ", ".join(sorted(indicator_coins)) if indicator_coins else "None"
+
+    summary_msg = (
+        f"<b>Coins passing EMA/MA prerequisite:</b>\n{eligible_list}\n\n"
+        f"<b>Coins with indicator-based trends/trades:</b>\n{indicator_list}\n\n"
+    )
+
     if all_messages:
         now = datetime.utcnow()
         four_days_ago = now - timedelta(days=4)
         header = (f"<b>Backtest results for the period:</b> "
                   f"{four_days_ago.strftime('%Y-%m-%d %H:%M')} UTC to {now.strftime('%Y-%m-%d %H:%M')} UTC\n\n")
-        full_message = header + "\n\n".join(all_messages)
+        full_message = header + summary_msg + "\n\n".join(all_messages)
         send_telegram_message(full_message)
     else:
-        send_telegram_message("No backtest results available for the past 4 days.")
-
+        send_telegram_message("No backtest results available for the past 4 days.\n\n" + summary_msg)
 
 if __name__ == "__main__":
     main()
