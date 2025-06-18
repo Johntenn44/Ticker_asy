@@ -22,18 +22,6 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # --- INDICATOR CALCULATION ---
 
-def calculate_kdj(df, n=9, k_period=3, d_period=3):
-    low_min = df['low'].rolling(window=n).min()
-    high_max = df['high'].rolling(window=n).max()
-    rsv = (df['close'] - low_min) / (high_max - low_min) * 100
-    k = rsv.ewm(alpha=1/k_period, adjust=False).mean()
-    d = k.ewm(alpha=1/d_period, adjust=False).mean()
-    j = 3 * k - 2 * d
-    df['K'] = k
-    df['D'] = d
-    df['J'] = j
-    return df
-
 def add_indicators(df):
     df['EMA200'] = df['close'].ewm(span=200, adjust=False).mean()
     df['MA50'] = df['close'].rolling(window=50).mean()
@@ -49,10 +37,9 @@ def add_indicators(df):
     df['WR50'] = -ta.momentum.WilliamsRIndicator(df['high'], df['low'], df['close'], lbp=50).williams_r()
     df['WR200'] = -ta.momentum.WilliamsRIndicator(df['high'], df['low'], df['close'], lbp=200).williams_r()
 
-    df = calculate_kdj(df)
     return df
 
-# --- TREND LOGIC WITH PRICE BETWEEN MA FILTER ---
+# --- TREND LOGIC WITH PRICE BETWEEN MA FILTER, NO KDJ ---
 
 def analyze_trend(df):
     last = df.iloc[-1]
@@ -72,12 +59,10 @@ def analyze_trend(df):
         return {'uptrend': False, 'downtrend': False, 'trend_end': False, 'values': last.to_dict()}
 
     # Check trend conditions only if price is between MAs
-    uptrend = (last['J'] > last['D'] > last['K']) and \
-              (last['RSI5'] > last['RSI13'] > last['RSI21']) and \
+    uptrend = (last['RSI5'] > last['RSI13'] > last['RSI21']) and \
               (last['WR8'] >= last['WR13'] >= last['WR50'] >= last['WR200'])
 
-    downtrend = (last['K'] > last['D'] > last['J']) and \
-                (last['RSI21'] > last['RSI13'] > last['RSI5']) and \
+    downtrend = (last['RSI21'] > last['RSI13'] > last['RSI5']) and \
                 (last['WR200'] >= last['WR50'] >= last['WR13'] >= last['WR8'])
 
     wr8, wr13, wr50, wr200 = last['WR8'], last['WR13'], last['WR50'], last['WR200']
@@ -88,7 +73,7 @@ def analyze_trend(df):
         'uptrend': uptrend,
         'downtrend': downtrend,
         'trend_end': trend_end,
-        'values': last[['close', 'K', 'D', 'J', 'RSI5', 'RSI13', 'RSI21',
+        'values': last[['close', 'RSI5', 'RSI13', 'RSI21',
                         'WR8', 'WR13', 'WR50', 'WR200', 'MA50', 'EMA200', 'MA200']].to_dict()
     }
 
