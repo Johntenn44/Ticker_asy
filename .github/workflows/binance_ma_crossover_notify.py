@@ -78,12 +78,6 @@ def analyze_trend(df):
 
     results = {}
     results['price_between_mas'] = low <= cp <= high
-    results['values'] = {
-        'close': cp,
-        'MA50': ma50,
-        'EMA200': ema200,
-        'MA200': ma200
-    }
     return results
 
 # --- DATA FETCHING ---
@@ -97,9 +91,7 @@ def fetch_ohlcv_ccxt(symbol, timeframe, limit):
     )
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     df.set_index('timestamp', inplace=True)
-    df['close'] = df['close'].astype(float)
-    df['high'] = df['high'].astype(float)
-    df['low'] = df['low'].astype(float)
+    df[['open','high','low','close','volume']] = df[['open','high','low','close','volume']].astype(float)
     return df
 
 # --- TELEGRAM NOTIFICATION ---
@@ -118,9 +110,7 @@ def send_telegram_message(message):
 
 def main():
     dt = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
-    coins_between_mas = []
-    coins_unequal_rsi = []
-    coins_unequal_kdj = []
+    coins_meeting_all = []
 
     for symbol in COINS:
         try:
@@ -131,67 +121,37 @@ def main():
 
             df = add_indicators(df)
             trend = analyze_trend(df)
+            if not trend.get('price_between_mas'):
+                continue  # skip if price not between MAs
 
-            # Check price between MAs
-            if trend.get('price_between_mas'):
-                coins_between_mas.append(symbol)
-
-            # Calculate RSI for 8, 13, 21 periods
+            # RSI check
             rsi8 = calculate_rsi(df['close'], 8).iloc[-1]
             rsi13 = calculate_rsi(df['close'], 13).iloc[-1]
             rsi21 = calculate_rsi(df['close'], 21).iloc[-1]
+            if np.isclose(rsi8, rsi13) and np.isclose(rsi13, rsi21):
+                continue  # skip if RSI values equal
 
-            if not (np.isclose(rsi8, rsi13) and np.isclose(rsi13, rsi21)):
-                coins_unequal_rsi.append(symbol)
-
-            # Calculate KDJ with length=5, ma1=8, ma2=8
+            # KDJ check
             k, d, j = calculate_kdj(df, length=5, ma1=8, ma2=8)
-            k_last = k.iloc[-1]
-            d_last = d.iloc[-1]
-            j_last = j.iloc[-1]
+            k_last, d_last, j_last = k.iloc[-1], d.iloc[-1], j.iloc[-1]
+            if np.isclose(k_last, d_last) and np.isclose(d_last, j_last):
+                continue  # skip if KDJ values equal
 
-            # Check if K, D, J are not all equal (allow small float tolerance)
-            if not (np.isclose(k_last, d_last) and np.isclose(d_last, j_last)):
-                coins_unequal_kdj.append(symbol)
+            coins_meeting_all.append(symbol)
 
         except Exception as e:
             print(f"Error processing {symbol}: {e}")
 
-    # Send price-between-MAs alert
-    if coins_between_mas:
-        coins_list = "\n".join(coins_between_mas)
+    if coins_meeting_all:
+        coins_list = "\n".join(coins_meeting_all)
         msg = (
-            f"<b>Kucoin {INTERVAL.upper()} Price Between MAs Alert ({dt})</b>\n"
-            f"Coins with price between MA50, EMA200, and MA200:\n\n"
+            f"<b>Kucoin {INTERVAL.upper()} Combined Alert ({dt})</b>\n"
+            f"Coins satisfying all conditions (Price between MAs, RSI unequal, KDJ unequal):\n\n"
             f"{coins_list}"
         )
         send_telegram_message(msg)
     else:
-        send_telegram_message("No coins have current price between MA50, EMA200, and MA200.")
-
-    # Send RSI inequality alert
-    if coins_unequal_rsi:
-        coins_list = "\n".join(coins_unequal_rsi)
-        msg = (
-            f"<b>Kucoin {INTERVAL.upper()} RSI Alert ({dt})</b>\n"
-            f"Coins where RSI(8), RSI(13), and RSI(21) are not equal:\n\n"
-            f"{coins_list}"
-        )
-        send_telegram_message(msg)
-    else:
-        send_telegram_message("All coins have equal RSI values for periods 8, 13, and 21.")
-
-    # Send KDJ inequality alert
-    if coins_unequal_kdj:
-        coins_list = "\n".join(coins_unequal_kdj)
-        msg = (
-            f"<b>Kucoin {INTERVAL.upper()} KDJ Alert ({dt})</b>\n"
-            f"Coins where KDJ (K, D, J) values are not equal:\n\n"
-            f"{coins_list}"
-        )
-        send_telegram_message(msg)
-    else:
-        send_telegram_message("All coins have equal KDJ values for parameters length=5, ma1=8, ma2=8.")
+        send_telegram_message("No coins satisfy all conditions at this time.")
 
 if __name__ == "__main__":
     main()
