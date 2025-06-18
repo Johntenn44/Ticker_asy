@@ -52,8 +52,26 @@ def add_indicators(df):
     # WR 8, 13, 50, 200
     for period in [8, 13, 50, 200]:
         df[f'WR{period}'] = williams_r(df['high'], df['low'], df['close'], period)
+    
+    # --- EMA/MA STRATEGY ADDITION ---
+    df['EMA50'] = df['close'].ewm(span=50, adjust=False).mean()
+    df['EMA200'] = df['close'].ewm(span=200, adjust=False).mean()
+    df['MA200'] = df['close'].rolling(window=200).mean()
+    # --- END ADDITION ---
 
     return df
+
+# --- EMA/MA PREREQUISITE FUNCTION ---
+
+def price_between_any_two_ma(df):
+    current = df.iloc[-1]
+    price = current['close']
+    ma_values = [current['EMA50'], current['EMA200'], current['MA200']]
+    for i in range(len(ma_values)):
+        for j in range(i+1, len(ma_values)):
+            if min(ma_values[i], ma_values[j]) < price < max(ma_values[i], ma_values[j]):
+                return True
+    return False
 
 # --- TREND LOGIC ---
 
@@ -75,10 +93,14 @@ def check_trend_conditions(df):
     wr8, wr13, wr50, wr200 = current['WR8'], current['WR13'], current['WR50'], current['WR200']
     wr_end = ((wr50 > wr8 > wr200) or (wr200 > wr8 > wr50)) and ((wr50 > wr13 > wr200) or (wr200 > wr13 > wr50))
 
+    # --- EMA/MA PREREQUISITE ---
+    ema_prereq = price_between_any_two_ma(df)
+    # --- END ADDITION ---
+
     return {
-        'uptrend': kdj_up and rsi_up and wr_up,
-        'downtrend': kdj_down and rsi_down and wr_down,
-        'trend_end': wr_end
+        'uptrend': kdj_up and rsi_up and wr_up and ema_prereq,
+        'downtrend': kdj_down and rsi_down and wr_down and ema_prereq,
+        'trend_end': wr_end and ema_prereq
     }
 
 def analyze_trend(df):
@@ -170,7 +192,6 @@ def backtest(df):
                 })
                 position = None
         else:
-            # No new trend, no end, just continue
             continue
 
     if position is not None:
