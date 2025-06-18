@@ -4,8 +4,9 @@ on:
   schedule:
     - cron: '53 11 * * *'
     - cron: '53 23 * * *'
-  workflow_dispatch:
-  
+  workflow_dispatch:         # Allows manual/API runs (already present)
+  repository_dispatch:      # <--- Added: Allows remote trigger from PythonAnywhere
+
 jobs:
   check_ma_crossover:
     runs-on: ubuntu-latest
