@@ -16,7 +16,7 @@ COINS = [
 
 EXCHANGE_ID = 'kucoin'
 INTERVAL = '12h'
-LOOKBACK = 300  # enough for indicator warm-up + 7 days
+LOOKBACK = 300  # enough for indicator warm-up + backtest period
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -111,7 +111,7 @@ def send_telegram_message(message):
 
 # --- BACKTEST FUNCTION ---
 
-def backtest_trend_signals(symbol, interval, days=7):
+def backtest_trend_signals(symbol, interval, days=14):
     candles_per_day = {
         '1m': 60*24,
         '5m': 12*24,
@@ -159,7 +159,7 @@ def main():
     results = []
     for symbol in COINS:
         try:
-            res = backtest_trend_signals(symbol, INTERVAL, days=7)
+            res = backtest_trend_signals(symbol, INTERVAL, days=14)  # <-- 14 days backtest
             results.append(res)
             print(f"{symbol} - Uptrend: {res['uptrend_signals']}, Downtrend: {res['downtrend_signals']}, Trend End: {res['trend_end_signals']}")
         except Exception as e:
@@ -169,7 +169,7 @@ def main():
         f"{r['symbol']}: Uptrend={r['uptrend_signals']}, Downtrend={r['downtrend_signals']}, Trend End={r['trend_end_signals']}"
         for r in results
     )
-    send_telegram_message(f"<b>7-Day Backtest Summary ({INTERVAL})</b>\n{summary}")
+    send_telegram_message(f"<b>14-Day Backtest Summary ({INTERVAL})</b>\n{summary}")
 
 if __name__ == "__main__":
     main()
