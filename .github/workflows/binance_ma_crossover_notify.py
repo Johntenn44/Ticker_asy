@@ -1,133 +1,78 @@
 import os
 import ccxt
 import pandas as pd
+import numpy as np  # Added for np.isclose
 import requests
 from datetime import datetime
 
 # --- CONFIGURATION ---
-
 COINS = [
-    "XRP/USDT",
-    "XMR/USDT",
-    "GMX/USDT",
-    "LUNA/USDT",
-    "TRX/USDT",
-    "EIGEN/USDT",
-    "APE/USDT",
-    "WAVES/USDT",
-    "PLUME/USDT",
-    "SUSHI/USDT",
-    "DOGE/USDT",
-    "VIRTUAL/USDT",
-    "CAKE/USDT",
-    "GRASS/USDT",
-    "AAVE/USDT",
-    "SUI/USDT",
-    "ARB/USDT",
-    "XLM/USDT",
-    "MNT/USDT",
-    "LTC/USDT",
-    "NEAR/USDT",
-    # Add more symbols here
+    "XRP/USDT", "XMR/USDT", "GMX/USDT", "LUNA/USDT", "TRX/USDT",
+    "EIGEN/USDT", "APE/USDT", "WAVES/USDT", "PLUME/USDT", "SUSHI/USDT",
+    "DOGE/USDT", "VIRTUAL/USDT", "CAKE/USDT", "GRASS/USDT", "AAVE/USDT",
+    "SUI/USDT", "ARB/USDT", "XLM/USDT", "MNT/USDT", "LTC/USDT", "NEAR/USDT"
 ]
 
 EXCHANGE_ID = 'kucoin'
-INTERVAL = '12h'      # Use 12-hour candles
-LOOKBACK = 210       # Number of candles to fetch (must be >= 200)
+INTERVAL = '12h'
+LOOKBACK = 210
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# --- INDICATOR CALCULATION ---
-
-def add_indicators(df):
-    df['EMA200'] = df['close'].ewm(span=200, adjust=False).mean()
-    df['MA50'] = df['close'].rolling(window=50).mean()
-    df['MA200'] = df['close'].rolling(window=200).mean()
-    return df
-
-# --- TREND LOGIC ---
-
-def analyze_trend(df):
-    cp = df['close'].iloc[-1]  # Current price
-    ma50 = df['MA50'].iloc[-1]
-    ema200 = df['EMA200'].iloc[-1]
-    ma200 = df['MA200'].iloc[-1]
-
-    # Check if current price is between the three moving averages in any order
-    low = min(ma50, ema200, ma200)
-    high = max(ma50, ema200, ma200)
-
-    results = {}
-    if low <= cp <= high:
-        results['price_between_mas'] = True
-    else:
-        results['price_between_mas'] = False
-
-    results['values'] = {
-        'close': cp,
-        'MA50': ma50,
-        'EMA200': ema200,
-        'MA200': ma200
-    }
-    return results
-
-# --- DATA FETCHING ---
-
-def fetch_ohlcv_ccxt(symbol, timeframe, limit):
-    exchange = getattr(ccxt, EXCHANGE_ID)()
-    exchange.load_markets()
-    ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
-    df = pd.DataFrame(
-        ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']
-    )
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    df.set_index('timestamp', inplace=True)
-    df['close'] = df['close'].astype(float)
-    return df
-
-# --- TELEGRAM NOTIFICATION ---
-
-def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
-        "parse_mode": "HTML"
-    }
-    resp = requests.post(url, data=payload)
-    resp.raise_for_status()
+# --- RSI CALCULATION ---
+def calculate_rsi(df, period):
+    delta = df['close'].diff()
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    avg_gain = gain.rolling(window=period).mean()
+    avg_loss = loss.rolling(window=period).mean()
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
 
 # --- MAIN LOGIC ---
-
 def main():
     dt = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
-    messages = []
+    coins_with_unequal_rsi = []
+    
     for symbol in COINS:
         try:
-            df = fetch_ohlcv_ccxt(symbol, INTERVAL, LOOKBACK)
-            if len(df) < 200:
-                print(f"Not enough data for {symbol}")
-                continue
-            df = add_indicators(df)
-            trend = analyze_trend(df)
-
-            if trend.get('price_between_mas'):
-                vals = trend['values']
-                msg = (
-                    f"<b>Kucoin {INTERVAL.upper()} Price Between MAs Alert ({dt})</b>\n"
-                    f"<b>Symbol:</b> <code>{symbol}</code>\n"
-                    f"Current price is <b>between</b> MA50, EMA200, and MA200.\n\n"
-                    f"<code>Close={vals['close']:.5f}, MA50={vals['MA50']:.5f}, EMA200={vals['EMA200']:.5f}, MA200={vals['MA200']:.5f}</code>"
-                )
-                messages.append(msg)
+            # Fetch OHLCV data
+            exchange = getattr(ccxt, EXCHANGE_ID)()
+            df = exchange.fetch_ohlcv(symbol, INTERVAL, limit=LOOKBACK)
+            df = pd.DataFrame(df, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            df['close'] = df['close'].astype(float)
+            
+            # Calculate RSI values
+            rsi8 = calculate_rsi(df, 8).iloc[-1]
+            rsi13 = calculate_rsi(df, 13).iloc[-1]
+            rsi21 = calculate_rsi(df, 21).iloc[-1]
+            
+            # Check if all three RSI values are not equal
+            if not (np.isclose(rsi8, rsi13) and np.isclose(rsi13, rsi21)):
+                coins_with_unequal_rsi.append(symbol)
+                
         except Exception as e:
             print(f"Error processing {symbol}: {e}")
 
-    if messages:
-        for msg in messages:
-            send_telegram_message(msg)
+    # Send Telegram notification
+    if coins_with_unequal_rsi:
+        coins_list = "\n".join(coins_with_unequal_rsi)
+        message = (
+            f"<b>Kucoin {INTERVAL.upper()} RSI Alert ({dt})</b>\n"
+            f"Coins with unequal RSI (8,13,21):\n\n{coins_list}"
+        )
+        send_telegram_message(message)
     else:
-        send_telegram_message("No coins have current price between MA50, EMA200, and MA200.")
+        send_telegram_message("All coins have equal RSI values for 8,13,21 periods")
+
+# --- TELEGRAM FUNCTION ---
+def send_telegram_message(message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    requests.post(url, json={
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML"
+    })
 
 if __name__ == "__main__":
     main()
