@@ -52,24 +52,33 @@ def add_indicators(df):
     df = calculate_kdj(df)
     return df
 
-# --- TREND LOGIC ---
+# --- TREND LOGIC WITH PRICE BETWEEN MA FILTER ---
 
 def analyze_trend(df):
     last = df.iloc[-1]
     price = last['close']
-    mas = [last['MA50'], last['EMA200'], last['MA200']]
-    low_ma, high_ma = min(mas), max(mas)
-    ema_ma_condition = low_ma <= price <= high_ma
+    ma50 = last['MA50']
+    ema200 = last['EMA200']
+    ma200 = last['MA200']
 
+    low_ma = min(ma50, ema200, ma200)
+    high_ma = max(ma50, ema200, ma200)
+
+    # Filter: price must be between min and max of these MAs
+    price_between_mas = low_ma <= price <= high_ma
+
+    if not price_between_mas:
+        # No trend signal if price outside MA range
+        return {'uptrend': False, 'downtrend': False, 'trend_end': False, 'values': last.to_dict()}
+
+    # Check trend conditions only if price is between MAs
     uptrend = (last['J'] > last['D'] > last['K']) and \
               (last['RSI5'] > last['RSI13'] > last['RSI21']) and \
-              (last['WR8'] >= last['WR13'] >= last['WR50'] >= last['WR200']) and \
-              ema_ma_condition
+              (last['WR8'] >= last['WR13'] >= last['WR50'] >= last['WR200'])
 
     downtrend = (last['K'] > last['D'] > last['J']) and \
                 (last['RSI21'] > last['RSI13'] > last['RSI5']) and \
-                (last['WR200'] >= last['WR50'] >= last['WR13'] >= last['WR8']) and \
-                ema_ma_condition
+                (last['WR200'] >= last['WR50'] >= last['WR13'] >= last['WR8'])
 
     wr8, wr13, wr50, wr200 = last['WR8'], last['WR13'], last['WR50'], last['WR200']
     trend_end = ((wr50 <= wr8 <= wr200 or wr200 <= wr8 <= wr50) and
@@ -79,7 +88,8 @@ def analyze_trend(df):
         'uptrend': uptrend,
         'downtrend': downtrend,
         'trend_end': trend_end,
-        'values': last[['close', 'K', 'D', 'J', 'RSI5', 'RSI13', 'RSI21', 'WR8', 'WR13', 'WR50', 'WR200', 'MA50', 'EMA200', 'MA200']].to_dict()
+        'values': last[['close', 'K', 'D', 'J', 'RSI5', 'RSI13', 'RSI21',
+                        'WR8', 'WR13', 'WR50', 'WR200', 'MA50', 'EMA200', 'MA200']].to_dict()
     }
 
 # --- DATA FETCHING ---
@@ -159,7 +169,7 @@ def main():
     results = []
     for symbol in COINS:
         try:
-            res = backtest_trend_signals(symbol, INTERVAL, days=14)  # <-- 14 days backtest
+            res = backtest_trend_signals(symbol, INTERVAL, days=14)
             results.append(res)
             print(f"{symbol} - Uptrend: {res['uptrend_signals']}, Downtrend: {res['downtrend_signals']}, Trend End: {res['trend_end_signals']}")
         except Exception as e:
