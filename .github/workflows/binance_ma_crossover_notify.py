@@ -53,11 +53,10 @@ def add_indicators(df):
     for period in [8, 13, 50, 200]:
         df[f'WR{period}'] = williams_r(df['high'], df['low'], df['close'], period)
     
-    # --- EMA/MA STRATEGY ADDITION ---
+    # EMA/MA STRATEGY ADDITION
     df['EMA50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['EMA200'] = df['close'].ewm(span=200, adjust=False).mean()
     df['MA200'] = df['close'].rolling(window=200).mean()
-    # --- END ADDITION ---
 
     return df
 
@@ -85,17 +84,16 @@ def check_trend_conditions(df):
     rsi_up = current['RSI5'] > current['RSI13'] > current['RSI21']
     rsi_down = current['RSI21'] > current['RSI13'] > current['RSI5']
 
-    # 3. WR: 8 > 13 > 50 > 200 for uptrend, 200 > 50 > 13 > 8 for downtrend
-    wr_up = current['WR8'] > current['WR13'] > current['WR50'] > current['WR200']
-    wr_down = current['WR200'] > current['WR50'] > current['WR13'] > current['WR8']
+    # 3. WR: updated logic
+    wr_up = (current['WR8'] > current['WR13'] >= current['WR50'] >= current['WR200'])
+    wr_down = (current['WR200'] >= current['WR50'] >= current['WR13'] > current['WR8'])
 
-    # 4. Trend end: 8 and 13 both between 50 and 200
+    # 4. Trend end: 8 and 13 both between 50 and 200 (unchanged)
     wr8, wr13, wr50, wr200 = current['WR8'], current['WR13'], current['WR50'], current['WR200']
     wr_end = ((wr50 > wr8 > wr200) or (wr200 > wr8 > wr50)) and ((wr50 > wr13 > wr200) or (wr200 > wr13 > wr50))
 
-    # --- EMA/MA PREREQUISITE ---
+    # EMA/MA prerequisite
     ema_prereq = price_between_any_two_ma(df)
-    # --- END ADDITION ---
 
     return {
         'uptrend': kdj_up and rsi_up and wr_up and ema_prereq,
