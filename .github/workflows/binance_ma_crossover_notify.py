@@ -111,6 +111,7 @@ def send_telegram_message(message):
 def main():
     dt = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
     coins_meeting_all = []
+    trend_indications = {}
 
     for symbol in COINS:
         try:
@@ -124,12 +125,22 @@ def main():
             if not trend.get('price_between_mas'):
                 continue  # skip if price not between MAs
 
-            # RSI check
+            # Calculate RSI values
             rsi8 = calculate_rsi(df['close'], 8).iloc[-1]
             rsi13 = calculate_rsi(df['close'], 13).iloc[-1]
             rsi21 = calculate_rsi(df['close'], 21).iloc[-1]
+
+            # RSI equality check
             if np.isclose(rsi8, rsi13) and np.isclose(rsi13, rsi21):
                 continue  # skip if RSI values equal
+
+            # Determine RSI trend
+            if rsi8 > rsi13 > rsi21:
+                rsi_trend = "Uptrend"
+            elif rsi8 < rsi13 < rsi21:
+                rsi_trend = "Downtrend"
+            else:
+                rsi_trend = "No clear RSI trend"
 
             # KDJ check
             k, d, j = calculate_kdj(df, length=5, ma1=8, ma2=8)
@@ -138,17 +149,17 @@ def main():
                 continue  # skip if KDJ values equal
 
             coins_meeting_all.append(symbol)
+            trend_indications[symbol] = rsi_trend
 
         except Exception as e:
             print(f"Error processing {symbol}: {e}")
 
     if coins_meeting_all:
-        coins_list = "\n".join(coins_meeting_all)
-        msg = (
-            f"<b>Kucoin {INTERVAL.upper()} Combined Alert ({dt})</b>\n"
-            f"Coins satisfying all conditions (Price between MAs, RSI unequal, KDJ unequal):\n\n"
-            f"{coins_list}"
-        )
+        msg_lines = [f"<b>Kucoin {INTERVAL.upper()} Combined Alert ({dt})</b>",
+                     "Coins satisfying all conditions (Price between MAs, RSI unequal, KDJ unequal):\n"]
+        for coin in coins_meeting_all:
+            msg_lines.append(f"{coin} - RSI Trend: {trend_indications.get(coin, 'N/A')}")
+        msg = "\n".join(msg_lines)
         send_telegram_message(msg)
     else:
         send_telegram_message("No coins satisfy all conditions at this time.")
