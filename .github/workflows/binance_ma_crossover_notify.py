@@ -9,12 +9,14 @@ import ta  # pip install ta
 
 COINS = [
     "XRP/USDT", "XMR/USDT", "GMX/USDT", "LUNA/USDT", "TRX/USDT",
-    # Add more symbols here
+    "EIGEN/USDT", "APE/USDT", "WAVES/USDT", "PLUME/USDT", "SUSHI/USDT",
+    "DOGE/USDT", "VIRTUAL/USDT", "CAKE/USDT", "GRASS/USDT", "AAVE/USDT",
+    "SUI/USDT", "ARB/USDT", "XLM/USDT", "MNT/USDT", "LTC/USDT", "NEAR/USDT"
 ]
 
 EXCHANGE_ID = 'kucoin'
 INTERVAL = '12h'
-LOOKBACK = 300  # enough for longest indicator window
+LOOKBACK = 300  # enough for indicator warm-up + 7 days
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -24,7 +26,6 @@ def calculate_kdj(df, n=9, k_period=3, d_period=3):
     low_min = df['low'].rolling(window=n).min()
     high_max = df['high'].rolling(window=n).max()
     rsv = (df['close'] - low_min) / (high_max - low_min) * 100
-
     k = rsv.ewm(alpha=1/k_period, adjust=False).mean()
     d = k.ewm(alpha=1/d_period, adjust=False).mean()
     j = 3 * k - 2 * d
@@ -38,12 +39,11 @@ def add_indicators(df):
     df['MA50'] = df['close'].rolling(window=50).mean()
     df['MA200'] = df['close'].rolling(window=200).mean()
 
-    # RSI
     df['RSI5'] = ta.momentum.RSIIndicator(df['close'], window=5).rsi()
     df['RSI13'] = ta.momentum.RSIIndicator(df['close'], window=13).rsi()
     df['RSI21'] = ta.momentum.RSIIndicator(df['close'], window=21).rsi()
 
-    # Williams %R (note: ta library's WilliamsR returns negative values, so invert sign)
+    # Williams %R returns negative values, invert sign for convenience
     df['WR8'] = -ta.momentum.WilliamsRIndicator(df['high'], df['low'], df['close'], lbp=8).williams_r()
     df['WR13'] = -ta.momentum.WilliamsRIndicator(df['high'], df['low'], df['close'], lbp=13).williams_r()
     df['WR50'] = -ta.momentum.WilliamsRIndicator(df['high'], df['low'], df['close'], lbp=50).williams_r()
@@ -55,39 +55,32 @@ def add_indicators(df):
 # --- TREND LOGIC ---
 
 def analyze_trend(df):
-    # Use last row for analysis
     last = df.iloc[-1]
-
-    # EMA/MA prerequisite example: current price between MA50 and EMA200 (customize as needed)
     price = last['close']
     mas = [last['MA50'], last['EMA200'], last['MA200']]
     low_ma, high_ma = min(mas), max(mas)
     ema_ma_condition = low_ma <= price <= high_ma
 
-    # Uptrend conditions
     uptrend = (last['J'] > last['D'] > last['K']) and \
               (last['RSI5'] > last['RSI13'] > last['RSI21']) and \
               (last['WR8'] >= last['WR13'] >= last['WR50'] >= last['WR200']) and \
               ema_ma_condition
 
-    # Downtrend conditions
     downtrend = (last['K'] > last['D'] > last['J']) and \
                 (last['RSI21'] > last['RSI13'] > last['RSI5']) and \
                 (last['WR200'] >= last['WR50'] >= last['WR13'] >= last['WR8']) and \
                 ema_ma_condition
 
-    # Trend end condition
     wr8, wr13, wr50, wr200 = last['WR8'], last['WR13'], last['WR50'], last['WR200']
-    trend_end = (wr50 <= wr8 <= wr200 or wr200 <= wr8 <= wr50) and \
-                (wr50 <= wr13 <= wr200 or wr200 <= wr13 <= wr50)
+    trend_end = ((wr50 <= wr8 <= wr200 or wr200 <= wr8 <= wr50) and
+                 (wr50 <= wr13 <= wr200 or wr200 <= wr13 <= wr50))
 
-    result = {
+    return {
         'uptrend': uptrend,
         'downtrend': downtrend,
         'trend_end': trend_end,
         'values': last[['close', 'K', 'D', 'J', 'RSI5', 'RSI13', 'RSI21', 'WR8', 'WR13', 'WR50', 'WR200', 'MA50', 'EMA200', 'MA200']].to_dict()
     }
-    return result
 
 # --- DATA FETCHING ---
 
@@ -104,6 +97,9 @@ def fetch_ohlcv_ccxt(symbol, timeframe, limit):
 # --- TELEGRAM NOTIFICATION ---
 
 def send_telegram_message(message):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Telegram credentials not set, skipping message.")
+        return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
@@ -113,60 +109,67 @@ def send_telegram_message(message):
     resp = requests.post(url, data=payload)
     resp.raise_for_status()
 
+# --- BACKTEST FUNCTION ---
+
+def backtest_trend_signals(symbol, interval, days=7):
+    candles_per_day = {
+        '1m': 60*24,
+        '5m': 12*24,
+        '15m': 4*24,
+        '30m': 2*24,
+        '1h': 24,
+        '2h': 12,
+        '4h': 6,
+        '6h': 4,
+        '12h': 2,
+        '1d': 1
+    }
+    limit = candles_per_day.get(interval, 2) * days + 250  # extra for warm-up
+
+    df = fetch_ohlcv_ccxt(symbol, interval, limit)
+    df = add_indicators(df)
+
+    uptrend_count = 0
+    downtrend_count = 0
+    trend_end_count = 0
+
+    start_idx = 250 if len(df) > 250 else 0
+
+    for i in range(start_idx, len(df)):
+        df_slice = df.iloc[:i+1]
+        trend = analyze_trend(df_slice)
+        if trend['uptrend']:
+            uptrend_count += 1
+        if trend['downtrend']:
+            downtrend_count += 1
+        if trend['trend_end']:
+            trend_end_count += 1
+
+    return {
+        'symbol': symbol,
+        'uptrend_signals': uptrend_count,
+        'downtrend_signals': downtrend_count,
+        'trend_end_signals': trend_end_count,
+        'total_candles': len(df) - start_idx
+    }
+
 # --- MAIN ---
 
 def main():
-    dt = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
-    messages = []
+    results = []
     for symbol in COINS:
         try:
-            df = fetch_ohlcv_ccxt(symbol, INTERVAL, LOOKBACK)
-            if len(df) < 200:
-                print(f"Not enough data for {symbol}")
-                continue
-            df = add_indicators(df)
-            trend = analyze_trend(df)
-
-            if trend['uptrend']:
-                msg = (
-                    f"<b>Uptrend Signal ({dt})</b>\n"
-                    f"<b>{symbol}</b>\n"
-                    f"KDJ: J={trend['values']['J']:.2f} > D={trend['values']['D']:.2f} > K={trend['values']['K']:.2f}\n"
-                    f"RSI: 5={trend['values']['RSI5']:.2f} > 13={trend['values']['RSI13']:.2f} > 21={trend['values']['RSI21']:.2f}\n"
-                    f"WR: 8={trend['values']['WR8']:.2f} >= 13={trend['values']['WR13']:.2f} >= 50={trend['values']['WR50']:.2f} >= 200={trend['values']['WR200']:.2f}\n"
-                    f"Price={trend['values']['close']:.5f}, MA50={trend['values']['MA50']:.5f}, EMA200={trend['values']['EMA200']:.5f}, MA200={trend['values']['MA200']:.5f}"
-                )
-                messages.append(msg)
-
-            elif trend['downtrend']:
-                msg = (
-                    f"<b>Downtrend Signal ({dt})</b>\n"
-                    f"<b>{symbol}</b>\n"
-                    f"KDJ: K={trend['values']['K']:.2f} > D={trend['values']['D']:.2f} > J={trend['values']['J']:.2f}\n"
-                    f"RSI: 21={trend['values']['RSI21']:.2f} > 13={trend['values']['RSI13']:.2f} > 5={trend['values']['RSI5']:.2f}\n"
-                    f"WR: 200={trend['values']['WR200']:.2f} >= 50={trend['values']['WR50']:.2f} >= 13={trend['values']['WR13']:.2f} >= 8={trend['values']['WR8']:.2f}\n"
-                    f"Price={trend['values']['close']:.5f}, MA50={trend['values']['MA50']:.5f}, EMA200={trend['values']['EMA200']:.5f}, MA200={trend['values']['MA200']:.5f}"
-                )
-                messages.append(msg)
-
-            elif trend['trend_end']:
-                msg = (
-                    f"<b>Trend End Signal ({dt})</b>\n"
-                    f"<b>{symbol}</b>\n"
-                    f"WR8 and WR13 are between WR50 and WR200.\n"
-                    f"WR8={trend['values']['WR8']:.2f}, WR13={trend['values']['WR13']:.2f}, WR50={trend['values']['WR50']:.2f}, WR200={trend['values']['WR200']:.2f}\n"
-                    f"Price={trend['values']['close']:.5f}"
-                )
-                messages.append(msg)
-
+            res = backtest_trend_signals(symbol, INTERVAL, days=7)
+            results.append(res)
+            print(f"{symbol} - Uptrend: {res['uptrend_signals']}, Downtrend: {res['downtrend_signals']}, Trend End: {res['trend_end_signals']}")
         except Exception as e:
-            print(f"Error processing {symbol}: {e}")
+            print(f"Error backtesting {symbol}: {e}")
 
-    if messages:
-        for msg in messages:
-            send_telegram_message(msg)
-    else:
-        send_telegram_message("No trend signals detected.")
+    summary = "\n".join(
+        f"{r['symbol']}: Uptrend={r['uptrend_signals']}, Downtrend={r['downtrend_signals']}, Trend End={r['trend_end_signals']}"
+        for r in results
+    )
+    send_telegram_message(f"<b>7-Day Backtest Summary ({INTERVAL})</b>\n{summary}")
 
 if __name__ == "__main__":
     main()
